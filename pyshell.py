@@ -2,6 +2,8 @@
 """
 AES256 Encrypted Shell Command API
 Receives encrypted JSON requests to execute shell commands and returns encrypted responses.
+
+AI Generated - Claude then manually modified.
 """
 
 import json
