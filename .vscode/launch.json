@@ -1,0 +1,40 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: PyShell",
+            "type": "debugpy",
+            "request": "launch",
+            "env": {
+                "PYSHELL_CRYPT_KEY": "21887als2141rwq294938jwkj3029rqsnj",
+                "PYSHELL_HOST": "0.0.0.0",
+                "PYSHELL_PORT": "5050",
+                "PYSHELL_PROC_TIMEOUT": "1800"
+            },
+            "program": "${workspaceFolder}/pyshell.py",
+            "console": "integratedTerminal"
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "5050",
+                "ls",
+                "-al"
+            ]
+        }
+    ]
+}
