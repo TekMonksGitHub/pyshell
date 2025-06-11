@@ -10,12 +10,13 @@
 const MONKSHULIBDIR = global.CONSTANTS ? CONSTANTS.LIBDIR : process.env.MONKSHU_HOME+"/backend/server/lib";
 
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
+global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
 class ShellCommandClient {
-    constructor(apiUrl = 'http://localhost:5000') {this.apiUrl = apiUrl;}
+    constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async executeCommand(cmd, args = []) {
+    async executeCommand(cmd, args = [], timeout) {
         try {
             // Prepare request data
             const requestData = {
@@ -24,19 +25,23 @@ class ShellCommandClient {
             };
 
             // Encrypt request
-            const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), undefined, undefined, true).toString("base64");
+            const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
+                undefined, true).toString("base64");
 
             // Send HTTP request
             const response = await fetch(`${this.apiUrl}/execute`, {
                 method: "POST",
                 headers: {'content-type': 'application/json; charset=UTF-8'},
-                body: JSON.stringify({data: encryptedRequest})
+                body: JSON.stringify({data: encryptedRequest}),
+                timeout
             });
+            if (response.status == 408) throw {request: encryptedRequest};
+            if ((!response.ok) || (response.status != 200)) throw {response};
 
             // Decrypt response
             const encryptedResponse = (await response.json()).data;
             const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
-            const decryptedResponse = crypt.decrypt(encryptedBytes);
+            const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
             const result = JSON.parse(decryptedResponse);
 
             return result;
@@ -55,9 +60,11 @@ class ShellCommandClient {
         }
     }
 
-    async healthCheck() {
+    async healthCheck(timeout) {
         try {
-            const response = await fetch(`${this.apiUrl}/health`);
+            const response = await fetch(`${this.apiUrl}/health`, {timeout});
+            if (response.status == 408) throw {response};
+            if ((!response.ok) || (response.status != 200)) throw {response};
             const encryptedResponse = (await response.json()).data;
             const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
             const decryptedResponse = crypt.decrypt(encryptedBytes);
@@ -74,7 +81,7 @@ function parseCommandLineArgs() {
     const args = process.argv.slice(2);
     let host = 'localhost';
     let port = 5000;
-    let configFile = 'config.json';
+    let aesKey;
     let commandArgs = [];
     
     for (let i = 0; i < args.length; i++) {
@@ -93,9 +100,9 @@ function parseCommandLineArgs() {
             } else {
                 throw new Error('--port requires a value');
             }
-        } else if (args[i] === '--config' || args[i] === '-c') {
+        } else if (args[i] === '--key' || args[i] === '-k') {
             if (i + 1 < args.length) {
-                configFile = args[++i];
+                aesKey = args[++i];
             } else {
                 throw new Error('--config requires a value');
             }
@@ -107,14 +114,14 @@ function parseCommandLineArgs() {
     }
     
     const apiUrl = `http://${host}:${port}`;
-    return { apiUrl, configFile, commandArgs };
+    return { apiUrl, aesKey, commandArgs };
 }
 
 // CLI Interface
 async function main() {
     try {
         // Parse command line arguments
-        const { apiUrl, configFile, commandArgs } = parseCommandLineArgs();
+        const { apiUrl, aesKey, commandArgs } = parseCommandLineArgs();
         
         if (commandArgs.length === 0) {
             console.log('Usage:');
@@ -124,18 +131,18 @@ async function main() {
             console.log('\nOptions:');
             console.log('  --host, -h <host>     API server host (default: localhost)');
             console.log('  --port, -p <port>     API server port (default: 5000)');
-            console.log('  --config, -c <file>   Config file path (default: config.json)');
+            console.log('  --key, -k <aes_key>   AES Key (default: default Monkshu key)');
             console.log('\nExamples:');
             console.log('  node client.js ls -la');
             console.log('  node client.js --host 192.168.1.100 --port 8080 ls -la');
             console.log('  node client.js -h api.example.com -p 443 echo "Hello World"');
-            console.log('  node client.js --config /path/to/config.json pwd');
+            console.log('  node client.js --key "MySecret30Character"');
             console.log('  node client.js --interactive');
             process.exit(1);
         }
 
         // Initialize client with parsed parameters
-        const client = new ShellCommandClient(apiUrl, configFile);
+        const client = new ShellCommandClient(apiUrl, aesKey);
         console.log(`Connecting to API at: ${apiUrl}`);
 
         // Handle special commands
@@ -205,15 +212,34 @@ async function interactiveMode(client) {
             }
 
             try {
-                const parts = trimmed.split(' ');
-                const cmd = parts[0];
-                const args = parts.slice(1);
+                let parts = trimmed.split(' ');
+                const cmd = parts[0]; parts = parts.slice(1);
+                const args = [];
+                const _countEndingSlashes = str => {
+                    let count = 0, index = str.length-1; 
+                    while (index >= 0) {if (str[index] == '\\') count++; else break; index--;}
+                    return count; 
+                }
+
+                let quoteChar, argsToCombine = []; for (let part of parts) {
+                    part = part.trim(); 
+                    if ((part.startsWith('"') || part.startsWith("'")) && (!quoteChar)) {argsToCombine = [part.substring(1)]; quoteChar = part[0]}
+                    else if ((part.endsWith('"') || part.endsWith("'")) && (quoteChar) && 
+                            (quoteChar == part[part.length-1]) && 
+                            (_countEndingSlashes(part.substring(0,part.length-1))%2 != 1)) {
+                        argsToCombine.push(part.substring(0, part.length-1)); args.push(argsToCombine.join(' ')); 
+                        quoteChar = undefined; argsToCombine = [];
+                    }
+                    else {if (quoteChar) argsToCombine.push(part); else args.push(part);}
+                }
+                if (argsToCombine.length) args.push(argsToCombine.join(' '));
                 
                 const result = await client.executeCommand(cmd, args);
                 
+                if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
+                if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
                 console.log(`\nExit Code: ${result.exit_code}`);
-                if (result.stdout) console.log(`Stdout: ${result.stdout}`);
-                if (result.stderr) console.log(`Stderr: ${result.stderr}`);
+
                 console.log('');
                 
             } catch (error) {
@@ -276,7 +302,7 @@ Installation and Usage:
 4. Programmatic usage:
    const { ShellCommandClient } = require('./client');
    
-   const client = new ShellCommandClient('http://api.example.com:8080', 'config.json');
+   const client = new ShellCommandClient('http://api.example.com:8080', aesKey);
    const result = await client.executeCommand('ls', ['-la']);
    console.log(result);
 */
