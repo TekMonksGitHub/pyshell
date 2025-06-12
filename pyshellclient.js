@@ -9,6 +9,8 @@
 
 const MONKSHULIBDIR = global.CONSTANTS ? CONSTANTS.LIBDIR : process.env.MONKSHU_HOME+"/backend/server/lib";
 
+const fs = require("fs");
+const path = require("path");
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
 global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
@@ -19,10 +21,7 @@ class ShellCommandClient {
     async executeCommand(cmd, args = [], timeout) {
         try {
             // Prepare request data
-            const requestData = {
-                cmd: cmd,
-                args: Array.isArray(args) ? args : [args]
-            };
+            const requestData = {cmd: cmd, args: Array.isArray(args) ? args : [args]};
 
             // Encrypt request
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
@@ -30,6 +29,47 @@ class ShellCommandClient {
 
             // Send HTTP request
             const response = await fetch(`${this.apiUrl}/execute`, {
+                method: "POST",
+                headers: {'content-type': 'application/json; charset=UTF-8'},
+                body: JSON.stringify({data: encryptedRequest}),
+                timeout
+            });
+            if (response.status == 408) throw {request: encryptedRequest};
+            if ((!response.ok) || (response.status != 200)) throw {response};
+
+            // Decrypt response
+            const encryptedResponse = (await response.json()).data;
+            const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
+            const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
+            const result = JSON.parse(decryptedResponse);
+
+            return result;
+
+        } catch (error) {
+            if (error.response) {
+                // HTTP error response
+                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            } else if (error.request) {
+                // Network error
+                throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
+            } else {
+                // Other error
+                throw new Error(`Client Error: ${error.message}`);
+            }
+        }
+    }
+
+    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", timeout) {
+        try {
+            // Prepare request data
+            const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell};
+
+            // Encrypt request
+            const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
+                undefined, true).toString("base64");
+
+            // Send HTTP request
+            const response = await fetch(`${this.apiUrl}/shellscript`, {
                 method: "POST",
                 headers: {'content-type': 'application/json; charset=UTF-8'},
                 body: JSON.stringify({data: encryptedRequest}),
@@ -80,7 +120,7 @@ class ShellCommandClient {
 function parseCommandLineArgs() {
     const args = process.argv.slice(2);
     let host = 'localhost';
-    let port = 5000;
+    let port = 5050;
     let aesKey;
     let commandArgs = [];
     
@@ -126,6 +166,7 @@ async function main() {
         if (commandArgs.length === 0) {
             console.log('Usage:');
             console.log('  node client.js [options] <command> [args...]');
+            console.log('  node client.js --shellscript <path> [args]');
             console.log('  node client.js [options] --health');
             console.log('  node client.js [options] --interactive');
             console.log('\nOptions:');
@@ -134,9 +175,10 @@ async function main() {
             console.log('  --key, -k <aes_key>   AES Key (default: default Monkshu key)');
             console.log('\nExamples:');
             console.log('  node client.js ls -la');
+            console.log('  node client.js --shellscript ./test.sh arg1 arg2');
             console.log('  node client.js --host 192.168.1.100 --port 8080 ls -la');
             console.log('  node client.js -h api.example.com -p 443 echo "Hello World"');
-            console.log('  node client.js --key "MySecret30Character"');
+            console.log('  node client.js --key "MySecret30CharacterMinimumKey"');
             console.log('  node client.js --interactive');
             process.exit(1);
         }
@@ -154,6 +196,27 @@ async function main() {
 
         if (commandArgs[0] === '--interactive') {
             await interactiveMode(client);
+            return;
+        }
+
+        if (commandArgs[0] === '--shellscript') {
+            const script = await fs.promises.readFile(commandArgs[1], "utf8");
+            const scriptfile_path = `/tmp/${path.basename(commandArgs[1])}`;
+            const scriptargs = commandArgs.slice(2);
+            const result = await client.executeScript(script, scriptfile_path, scriptargs);
+            // Display results
+            console.log('\n--- Execution Result ---');
+            console.log(`Exit Code: ${result.exit_code}`);
+            
+            if (result.stdout) {
+                console.log('\nStdout:');
+                console.log(result.stdout);
+            }
+            
+            if (result.stderr) {
+                console.log('\nStderr:');
+                console.log(result.stderr);
+            }
             return;
         }
 
@@ -212,6 +275,28 @@ async function interactiveMode(client) {
             }
 
             try {
+                if (trimmed.startsWith('shellscript ')) {
+                    const parts = trimmed.split(' ');
+                    const scriptPath = parts[1];
+                    const script = await fs.promises.readFile(scriptPath, "utf8");
+                    const remoteScriptPath = "/tmp/"+path.basename(scriptPath);
+                    const result = await client.executeScript(script, remoteScriptPath, parts.slice(2));
+
+                    if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
+                    if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
+                    console.log(`\nExit Code: ${result.exit_code}`);
+
+                    console.log('');
+                    askCommand();
+                    return;
+                }
+            } catch (error) {
+                console.error('Error:', error.message+"\n"+error.stack);
+                askCommand();
+                return;
+            }
+
+            try {
                 let parts = trimmed.split(' ');
                 const cmd = parts[0]; parts = parts.slice(1);
                 const args = [];
@@ -260,49 +345,3 @@ module.exports = { ShellCommandClient };
 if (require.main === module) {
     main();
 }
-
-/*
-Package.json example:
-{
-  "name": "shell-command-client",
-  "version": "1.0.0",
-  "description": "Node.js client for AES256-CTR encrypted shell command API",
-  "main": "client.js",
-  "dependencies": {},
-  "bin": {
-    "shell-client": "./client.js"
-  }
-}
-
-Installation and Usage:
-1. Add environment variable MONKSHU_HOME to point to Monkshu so libraries can be loaded.
-
-3. Usage examples:
-   
-   # Execute commands with default host/port (localhost:5000)
-   node client.js ls -la
-   node client.js echo "Hello World"
-   
-   # Execute commands with custom host/port
-   node client.js --host 192.168.1.100 --port 8080 ls -la
-   node client.js -h api.example.com -p 443 pwd
-   
-   # Use custom config file
-   node client.js --config /path/to/config.json ls -la
-   
-   # Combined options
-   node client.js --host 10.0.0.1 --port 9000 --config prod.json echo "Hello"
-   
-   # Health check with custom host/port
-   node client.js --host 192.168.1.100 --port 8080 --health
-   
-   # Interactive mode with custom host/port
-   node client.js --host api.example.com --port 443 --interactive
-
-4. Programmatic usage:
-   const { ShellCommandClient } = require('./client');
-   
-   const client = new ShellCommandClient('http://api.example.com:8080', aesKey);
-   const result = await client.executeCommand('ls', ['-la']);
-   console.log(result);
-*/

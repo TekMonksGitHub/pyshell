@@ -93,7 +93,7 @@ class AESCrypto:
 crypto = None
 # Other globals
 host = '127.0.0.1'
-port = '5000'
+port = '5050'
 proctimeout = 1800  # 30 minutes default timeout
 
 def load_config():
@@ -196,6 +196,52 @@ def execute_endpoint():
     except Exception as e:
         logger.error(f"Request processing error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
+    
+@app.route('/shellscript', methods=['POST'])
+def shellscript_endpoint():
+    """Main API endpoint for encrypted shell script execution"""
+    try:
+        # Get encrypted data from request
+        if not request.is_json:
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        
+        encrypted_input = request.json.get('data')
+        if not encrypted_input:
+            return jsonify({'error': 'Missing encrypted data field'}), 400
+        
+        # Decrypt input
+        decrypted_input = crypto.decrypt(encrypted_input)
+        input_data = json.loads(decrypted_input)
+        
+        # Validate input format
+        if 'script' not in input_data:
+            return jsonify({'error': 'Missing script parameter'}), 400
+        if 'scriptfile_path' not in input_data:
+            return jsonify({'error': 'Missing script parameter'}), 400
+        
+        script = input_data['script']
+        args = input_data.get('args', [])
+        cmd_shell = input_data.get('shell', "/bin/bash")
+        scriptfile_path = input_data['scriptfile_path']
+        fileout = open(scriptfile_path, "w")
+        fileout.write(script)
+        fileout.close()
+        
+        # Execute command
+        logger.info(f"Executing script: {request.remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
+        result = execute_command(cmd_shell, [scriptfile_path]+args)
+        
+        # Encrypt response
+        response_json = json.dumps(result)
+        encrypted_response = crypto.encrypt(response_json)
+        
+        return jsonify({'data': encrypted_response})
+        
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON in decrypted data'}), 400
+    except Exception as e:
+        logger.error(f"Request processing error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -218,54 +264,3 @@ if __name__ == '__main__':
     
     # Run the Flask app
     serve(app, host=host, port=port, ipv6=True)
-
-# Example usage and testing code:
-"""
-1. Create a config.json file:
-{
-    "encryption_key": "MySecureEncryptionKeyWith30Plus!",
-    "host": "127.0.0.1",
-    "port": 5050,
-    "proc_timeout": 1800
-}
-
-2. Install dependencies:
-pip install flask cryptography
-
-3. Run the server:
-python api_server.py
-
-4. Test with curl or requests:
-
-Example client code:
-```python
-import requests
-import json
-from api_server import AESCrypto
-
-# Initialize crypto with same key (minimum 30 characters)
-crypto = AESCrypto("MySecureEncryptionKeyWith30Plus!")
-
-# Prepare request
-request_data = {
-    "cmd": "echo",
-    "args": ["Hello, World!"]
-}
-
-# Encrypt request
-encrypted_request = crypto.encrypt(json.dumps(request_data))
-
-# Send request
-response = requests.post('http://localhost:5000/execute', 
-                        json={'data': encrypted_request})
-
-# Decrypt response
-if response.status_code == 200:
-    encrypted_response = response.json()['data']
-    decrypted_response = crypto.decrypt(encrypted_response)
-    result = json.loads(decrypted_response)
-    print(f"Exit code: {result['exit_code']}")
-    print(f"Stdout: {result['stdout']}")
-    print(f"Stderr: {result['stderr']}")
-```
-"""
