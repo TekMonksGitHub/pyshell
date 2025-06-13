@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * Node.js Client for AES256-CTR Encrypted Shell Command API
  * Communicates with the Python Flask Shell API using encrypted JSON
@@ -11,7 +13,9 @@ const MONKSHULIBDIR = global.CONSTANTS ? CONSTANTS.LIBDIR : process.env.MONKSHU_
 
 const fs = require("fs");
 const path = require("path");
+const util = require("util");
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
+const execasync = util.promisify(require("child_process").exec);
 global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
@@ -114,6 +118,15 @@ class ShellCommandClient {
             throw new Error(`Health check failed: ${error.message}`);
         }
     }
+
+    async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
+            pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout) {
+        const args = [`'${__dirname}/deploy.sh'`, host, port, id, `'${password}'`, `'${pyshell_path}'`,
+            pyshell_user, pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout];
+        const cmd = args.join(' ');
+        try {const {stdout, stderr} = execasync(cmd); return {stdout, stderr, exit_code: 0};} 
+        catch (error) {return {stdout: undefined, stderr: error.message, exit_code: error.status};}
+    }
 }
 
 // Parse command line arguments for host and port
@@ -208,6 +221,30 @@ async function main() {
             console.log('\n--- Execution Result ---');
             console.log(`Exit Code: ${result.exit_code}`);
             
+            if (result.stdout) {
+                console.log('\nStdout:');
+                console.log(result.stdout);
+            }
+            
+            if (result.stderr) {
+                console.log('\nStderr:');
+                console.log(result.stderr);
+            }
+            return;
+        }
+
+        if (commandArgs[0] === '--deploy') {
+            const host = commandArgs[1], port = commandArgs[2], id = commandArgs[3];
+            const password = commandArgs[4], pyshell_path = commandArgs[5];
+            const pyshell_user = commandArgs[6], pyshell_aeskey = commandArgs[7];
+            const pyshell_listening_host = commandArgs[8], pyshell_listening_port = commandArgs[9];
+            const pyshell_process_default_timeout = commandArgs[10] || 1800;
+            const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
+                pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
+            // Display results
+            console.log('\n--- Deployment Result ---');
+            console.log(`Exit Code: ${result.exit_code}`);
+
             if (result.stdout) {
                 console.log('\nStdout:');
                 console.log(result.stdout);

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 AES256 Encrypted Shell Command API
 Receives encrypted JSON requests to execute shell commands and returns encrypted responses.
@@ -6,6 +7,7 @@ Receives encrypted JSON requests to execute shell commands and returns encrypted
 AI Generated - Claude then manually modified.
 """
 
+import sys
 import json
 import subprocess
 import base64
@@ -107,15 +109,12 @@ def load_config():
         except Exception as e:
             config = {}
 
-        key = os.getenv('PYSHELL_CRYPT_KEY', config.get('encryption_key'))
+        key = (len(sys.argv)>1 and sys.argv[1]) or os.getenv('PYSHELL_CRYPT_KEY') or config.get('encryption_key')
         if not key:
             raise ValueError("encryption_key not found in config file")
-        host_modified = os.getenv('PYSHELL_HOST', config.get('host'))
-        port_modified = os.getenv('PYSHELL_PORT', config.get('port'))
-        timeout_modified = int(os.getenv('PYSHELL_PROC_TIMEOUT', config.get('proc_timeout')))
-        host = host_modified if host_modified is not None else '127.0.0.1'
-        port = port_modified if port_modified is not None else '5000'
-        proctimeout = timeout_modified or proctimeout
+        host = (len(sys.argv)>2 and sys.argv[2]) or os.getenv('PYSHELL_HOST') or config.get('host') or host
+        port = (len(sys.argv)>3 and sys.argv[3]) or os.getenv('PYSHELL_PORT') or config.get('port') or port
+        proctimeout = int((len(sys.argv)>4 and sys.argv[4]) or os.getenv('PYSHELL_PROC_TIMEOUT') or config.get('proc_timeout') or proctimeout)
             
         crypto = AESCrypto(key)
         logger.info("Configuration loaded successfully")
@@ -124,7 +123,7 @@ def load_config():
         logger.error(f"Failed to load configuration: {e}")
         raise
 
-def execute_command(cmd, args):
+def execute_command(cmd, args, timeout=proctimeout):
     """Execute shell command safely and return result"""
     try:
         # Combine command and arguments
@@ -135,7 +134,7 @@ def execute_command(cmd, args):
             full_command,
             capture_output=True,
             text=True,
-            timeout=proctimeout, 
+            timeout=timeout, 
             check=False  # Don't raise exception on non-zero exit
         )
         
@@ -180,10 +179,11 @@ def execute_endpoint():
         
         cmd = input_data['cmd']
         args = input_data.get('args', [])
+        timeout = input_data.get('timeout', proctimeout)
         
         # Execute command
         logger.info(f"Executing: {request.remote_addr} -> {cmd} {args}")
-        result = execute_command(cmd, args)
+        result = execute_command(cmd, args, timeout)
         
         # Encrypt response
         response_json = json.dumps(result)
@@ -222,14 +222,16 @@ def shellscript_endpoint():
         script = input_data['script']
         args = input_data.get('args', [])
         cmd_shell = input_data.get('shell', "/bin/bash")
+        timeout = input_data.get('timeout', proctimeout)
         scriptfile_path = input_data['scriptfile_path']
+
         fileout = open(scriptfile_path, "w")
         fileout.write(script)
         fileout.close()
         
         # Execute command
         logger.info(f"Executing script: {request.remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
-        result = execute_command(cmd_shell, [scriptfile_path]+args)
+        result = execute_command(cmd_shell, [scriptfile_path]+args, timeout)
         
         # Encrypt response
         response_json = json.dumps(result)
@@ -263,4 +265,5 @@ if __name__ == '__main__':
     load_config()
     
     # Run the Flask app
+    logger.info(f"Starting on {host}:{port} proctimeout {proctimeout} sec")
     serve(app, host=host, port=port, ipv6=True)

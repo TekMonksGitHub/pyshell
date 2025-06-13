@@ -20,7 +20,7 @@ pip install flask cryptography
 
 3. Run the server:
 ```
-python api_server.py
+python3 pyshell.py [key] [host] [port] [process_timeout_in_seconds]
 ```
 
 4. Test with curl or requests:
@@ -29,7 +29,7 @@ Example client code:
 ```python
 import requests
 import json
-from api_server import AESCrypto
+from pyshell import AESCrypto
 
 # Initialize crypto with same key (minimum 30 characters)
 crypto = AESCrypto("MySecureEncryptionKeyWith30Plus!")
@@ -77,6 +77,13 @@ Installation and Usage:
 1. Add environment variable MONKSHU_HOME to point to Monkshu so libraries can be loaded.
 
 3. Usage examples:
+
+## Deploy pyshell to a new server
+```
+node client.js --deploy <ssh_host> <ssh_port> <ssh_id> <ssh_password> "<pyshell_deployment_path>" \    
+                        <pyshell_process_user> <pyshell_aeskey> <pyshell_listening_host> \
+                        <pyshell_listening_port> [pyshell_process_default_timeout=1800]
+```
    
 ## Execute commands with default host/port (localhost:5050)
 ```

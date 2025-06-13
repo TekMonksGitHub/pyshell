@@ -1,0 +1,14 @@
+[Unit]
+Description=Pyshell service
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User={{PYSHELL_ID}}
+ExecStart="{{PYTHON3_VENV_BIN}}/python3" "{{PYSHELL_PATH}}/pyshell.py" {{PYSHELL_KEY}} {{PYSHELL_HOST}} {{PYSHELL_PORT}} {{PYSHELL_TIMEOUT}}
+
+[Install]
+WantedBy=multi-user.target
