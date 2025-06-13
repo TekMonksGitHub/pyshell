@@ -122,7 +122,7 @@ class ShellCommandClient {
     async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
             pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout) {
         const args = [`'${__dirname}/deploy/deploy.sh'`, host, port, id, `'${password}'`, `'${pyshell_path}'`,
-            pyshell_user, pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout];
+            pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_user, pyshell_process_default_timeout];
         const cmd = args.join(' ');
         try {const {stdout, stderr} = await execasync(cmd); return {stdout, stderr, exit_code: 0};} 
         catch (error) {return {stdout: undefined, stderr: error.message, exit_code: error.status};}
@@ -319,6 +319,25 @@ async function interactiveMode(client) {
                     const remoteScriptPath = "/tmp/"+path.basename(scriptPath);
                     const result = await client.executeScript(script, remoteScriptPath, parts.slice(2));
 
+                    if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
+                    if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
+                    console.log(`\nExit Code: ${result.exit_code}`);
+
+                    console.log('');
+                    askCommand();
+                    return;
+                }
+
+                if (trimmed.startsWith('deploy ')) {
+                    const parts = trimmed.split(' ');
+                    const host = parts[1], port = parts[2], id = parts[3];
+                    const password = parts[4], pyshell_path = parts[5];
+                    const pyshell_user = parts[6], pyshell_aeskey = parts[7];
+                    const pyshell_listening_host = parts[8], pyshell_listening_port = parts[9];
+                    const pyshell_process_default_timeout = parts[10] || 1800;
+                    const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
+                        pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
+                    // Display results
                     if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
                     if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
                     console.log(`\nExit Code: ${result.exit_code}`);
