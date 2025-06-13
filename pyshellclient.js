@@ -121,10 +121,10 @@ class ShellCommandClient {
 
     async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
             pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout) {
-        const args = [`'${__dirname}/deploy.sh'`, host, port, id, `'${password}'`, `'${pyshell_path}'`,
+        const args = [`'${__dirname}/deploy/deploy.sh'`, host, port, id, `'${password}'`, `'${pyshell_path}'`,
             pyshell_user, pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout];
         const cmd = args.join(' ');
-        try {const {stdout, stderr} = execasync(cmd); return {stdout, stderr, exit_code: 0};} 
+        try {const {stdout, stderr} = await execasync(cmd); return {stdout, stderr, exit_code: 0};} 
         catch (error) {return {stdout: undefined, stderr: error.message, exit_code: error.status};}
     }
 }

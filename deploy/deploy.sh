@@ -48,7 +48,7 @@ if ! cat "$SCRIPT_DIR/pyshell.service.template" | sshpass -p "$PASS" ssh -o Stri
     exitFailed "Service file upload failed"
 fi
 
-if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no $ID@$HOST -p $SSHPORT 'bash -s' < remotedeploy.sh "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT; then
+if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no $ID@$HOST -p $SSHPORT 'bash -s' < "$SCRIPT_DIR/remotedeploy.sh" "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT; then
     exitFailed "Script remote deployment failed"
 fi
 
