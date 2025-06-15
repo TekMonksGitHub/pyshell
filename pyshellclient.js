@@ -153,7 +153,7 @@ function parseCommandLineArgs() {
     }
     const args = processargs.getArgs(argMap);
     if (!args) return;
-    else return { apiUrl: `http://${args.host[0]}:${args.port[0]}`, aesKey: args.key?.[0], args };
+    else return { apiUrl: `http://${args.host[0]}:${args.port[0]}`, aesKey: args.key?.[0], commandArgs: args };
 }
 
 // CLI Interface
