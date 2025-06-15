@@ -9,12 +9,14 @@
  * Needs Monkshu libraries - crypt and httpClient
  */
 
+if ((!global.CONSTANTS) && (!process.env.MONKSHU_HOME)) {console.error("\nError: MONKSHU_HOME not set.\n"); process.exit(1);}
 const MONKSHULIBDIR = global.CONSTANTS ? CONSTANTS.LIBDIR : process.env.MONKSHU_HOME+"/backend/server/lib";
 
 const fs = require("fs");
 const path = require("path");
 const util = require("util");
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
+const processargs = require(`${MONKSHULIBDIR}/processargs.js`);
 const execasync = util.promisify(require("child_process").exec);
 global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
@@ -131,91 +133,63 @@ class ShellCommandClient {
 
 // Parse command line arguments for host and port
 function parseCommandLineArgs() {
-    const args = process.argv.slice(2);
-    let host = 'localhost';
-    let port = 5050;
-    let aesKey;
-    let commandArgs = [];
-    
-    for (let i = 0; i < args.length; i++) {
-        if (args[i] === '--host' || args[i] === '-h') {
-            if (i + 1 < args.length) {
-                host = args[++i];
-            } else {
-                throw new Error('--host requires a value');
-            }
-        } else if (args[i] === '--port' || args[i] === '-p') {
-            if (i + 1 < args.length) {
-                port = parseInt(args[++i]);
-                if (isNaN(port) || port < 1 || port > 65535) {
-                    throw new Error('--port must be a valid port number (1-65535)');
-                }
-            } else {
-                throw new Error('--port requires a value');
-            }
-        } else if (args[i] === '--key' || args[i] === '-k') {
-            if (i + 1 < args.length) {
-                aesKey = args[++i];
-            } else {
-                throw new Error('--config requires a value');
-            }
-        } else {
-            // Remaining args are the command
-            commandArgs = args.slice(i);
-            break;
-        }
+    argMap = { 
+        "__description": "\nPyShellClient. (C) 2024 Tekmonks.",
+        "h": {long: "host", required: true, minlength: 1, help: "Host to connect to."},
+        "p": {long: "port", required: true, minlength: 1, help: "Port to connect to."},
+        "k": {long: "key", required: false, minlength: 1, help: "AES key for the connection. Default: Monkshu key."},
+        "c": {long: "command", required: false, minlength: 1, help: "Command and [args...] if specified"}, 
+        "s": {long: "shellscript", required: false, minlength: 1, help: "Shell script and [args...] if specified"},
+        "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout"},
+        "t": {long: "health", required: false, help: "Remote server's health"},
+        "i": {long: "interactive", required: false, help: "Run an interactive session"},
+        "__extra_help": "\nExamples\n"+
+            `\tnode ${process.argv[1]} --command ls -la\n`+
+            `\tnode ${process.argv[1]} -h api.example.com -p 443 --shellscript ./test.sh arg1 arg2\n`+
+            `\tnode ${process.argv[1]} --host 192.168.1.100 --port 8080 --command ls -la\n`+
+            `\tnode ${process.argv[1]} -h api.example.com -p 443 echo "Hello World"\n`+
+            `\tnode ${process.argv[1]} --key "MySecret30CharacterMinimumKey" --host 192.168.1.100 --port 8080 --command ls -la\n`+
+            `\tnode ${process.argv[1]} -h api.example.com -p 443 --interactive\n`
     }
-    
-    const apiUrl = `http://${host}:${port}`;
-    return { apiUrl, aesKey, commandArgs };
+    const args = processargs.getArgs(argMap);
+    if (!args) return;
+    else return { apiUrl: `http://${args.host[0]}:${args.port[0]}`, aesKey: args.key?.[0], args };
 }
 
 // CLI Interface
 async function main() {
     try {
         // Parse command line arguments
-        const { apiUrl, aesKey, commandArgs } = parseCommandLineArgs();
-        
-        if (commandArgs.length === 0) {
-            console.log('Usage:');
-            console.log('  node client.js [options] <command> [args...]');
-            console.log('  node client.js --shellscript <path> [args]');
-            console.log('  node client.js [options] --health');
-            console.log('  node client.js [options] --interactive');
-            console.log('\nOptions:');
-            console.log('  --host, -h <host>     API server host (default: localhost)');
-            console.log('  --port, -p <port>     API server port (default: 5000)');
-            console.log('  --key, -k <aes_key>   AES Key (default: default Monkshu key)');
-            console.log('\nExamples:');
-            console.log('  node client.js ls -la');
-            console.log('  node client.js --shellscript ./test.sh arg1 arg2');
-            console.log('  node client.js --host 192.168.1.100 --port 8080 ls -la');
-            console.log('  node client.js -h api.example.com -p 443 echo "Hello World"');
-            console.log('  node client.js --key "MySecret30CharacterMinimumKey"');
-            console.log('  node client.js --interactive');
-            process.exit(1);
-        }
+        const parseResult = parseCommandLineArgs(); if (!parseResult) throw new Error(`Command line error.`);
+        const { apiUrl, aesKey, commandArgs } = parseResult;
 
         // Initialize client with parsed parameters
-        const client = new ShellCommandClient(apiUrl, aesKey);
+        let client = new ShellCommandClient(apiUrl, aesKey);
         console.log(`Connecting to API at: ${apiUrl}`);
 
         // Handle special commands
-        if (commandArgs[0] === '--health') {
+        if (commandArgs.health) {
             const health = await client.healthCheck();
             console.log('Health Check Result:', JSON.stringify(health, null, 2));
             return;
         }
 
-        if (commandArgs[0] === '--interactive') {
+        if (commandArgs.interactive) {
             await interactiveMode(client);
             return;
         }
 
-        if (commandArgs[0] === '--shellscript') {
-            const script = await fs.promises.readFile(commandArgs[1], "utf8");
-            const scriptfile_path = `/tmp/${path.basename(commandArgs[1])}`;
-            const scriptargs = commandArgs.slice(2);
+        if (commandArgs.reconnect) {
+            const apiUrl = `http://${commandArgs.reconnect[0]}:${commandArgs.reconnect[1]}`;
+            client = new ShellCommandClient(apiUrl, commandArgs.reconnect[2]);
+            console.log(`Connecting to API at: ${apiUrl}`);
+            return;
+        }
+
+        if (commandArgs.shellscript) {
+            const script = await fs.promises.readFile(commandArgs.shellscript[0], "utf8");
+            const scriptfile_path = `/tmp/${path.basename(commandArgs.shellscript[0])}`;
+            const scriptargs = commandArgs.shellscript(1);
             const result = await client.executeScript(script, scriptfile_path, scriptargs);
             // Display results
             console.log('\n--- Execution Result ---');
@@ -233,12 +207,12 @@ async function main() {
             return;
         }
 
-        if (commandArgs[0] === '--deploy') {
-            const host = commandArgs[1], port = commandArgs[2], id = commandArgs[3];
-            const password = commandArgs[4], pyshell_path = commandArgs[5];
-            const pyshell_user = commandArgs[6], pyshell_aeskey = commandArgs[7];
-            const pyshell_listening_host = commandArgs[8], pyshell_listening_port = commandArgs[9];
-            const pyshell_process_default_timeout = commandArgs[10] || 1800;
+        if (commandArgs.deploy) {
+            const dpArgs = commandArgs.deploy, host = dpArgs[0], port = dpArgs[1], id = dpArgs[2];
+            const password = dpArgs[3], pyshell_path = dpArgs[4];
+            const pyshell_user = dpArgs[5], pyshell_aeskey = dpArgs[6];
+            const pyshell_listening_host = dpArgs[7], pyshell_listening_port = dpArgs[8];
+            const pyshell_process_default_timeout = dpArgs[9] || 1800;
             const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
                 pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
             // Display results
@@ -258,24 +232,26 @@ async function main() {
         }
 
         // Execute command
-        const cmd = commandArgs[0];
-        const cmdArgs = commandArgs.slice(1);
+        if (commandArgs.command) {
+            const cmd = commandArgs.command[1];
+            const cmdArgs = commandArgs.command.slice(1);
 
-        console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
-        const result = await client.executeCommand(cmd, cmdArgs);
+            console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
+            const result = await client.executeCommand(cmd, cmdArgs);
 
-        // Display results
-        console.log('\n--- Execution Result ---');
-        console.log(`Exit Code: ${result.exit_code}`);
-        
-        if (result.stdout) {
-            console.log('\nStdout:');
-            console.log(result.stdout);
-        }
-        
-        if (result.stderr) {
-            console.log('\nStderr:');
-            console.log(result.stderr);
+            // Display results
+            console.log('\n--- Execution Result ---');
+            console.log(`Exit Code: ${result.exit_code}`);
+            
+            if (result.stdout) {
+                console.log('\nStdout:');
+                console.log(result.stdout);
+            }
+            
+            if (result.stderr) {
+                console.log('\nStderr:');
+                console.log(result.stderr);
+            }
         }
 
     } catch (error) {
