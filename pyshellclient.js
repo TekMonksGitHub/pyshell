@@ -197,8 +197,9 @@ async function interactiveMode(client) {
     console.log('Format: <command> [args...]');
     console.log('Example: ls -la\n');
 
-    const askCommand = () => {
-        rl.question('> ', async (input) => {
+    const askCommand = async () => {
+        const health = await client.healthCheck()
+        rl.question(`${health.user+'@'+health.hostname} # `, async (input) => {
             const trimmed = input.trim();
             if (trimmed === 'exit' || trimmed === 'quit') {rl.close(); return;}
             if (trimmed === '') {askCommand(); return;}
@@ -211,7 +212,14 @@ async function interactiveMode(client) {
                     const remoteScriptPath = "/tmp/"+path.basename(scriptPath);
                     const result = await client.executeScript(script, remoteScriptPath, parts.slice(2));
                     displayResult(result, true);
-                    askCommand();
+                    setImmediate(_=>askCommand());
+                    return;
+                }
+
+                if (trimmed === 'pyshellhealth') {
+                    const health = await client.healthCheck();
+                    console.log('Health Check Result:', JSON.stringify(health, null, 2));
+                    setImmediate(_=>askCommand());
                     return;
                 }
 
@@ -226,7 +234,7 @@ async function interactiveMode(client) {
                         pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
                     // Display results
                     displayResult(result, true);
-                    askCommand();
+                    setImmediate(_=>askCommand());
                     return;
                 }
 
@@ -236,7 +244,7 @@ async function interactiveMode(client) {
                     const apiUrl = `http://${host}:${port}`;
                     client = new ShellCommandClient(apiUrl, aeskey);
                     console.log(`Connecting to API at: ${apiUrl}`);
-                    askCommand();
+                    setImmediate(_=>askCommand());
                     return;
                 }
 
@@ -265,10 +273,10 @@ async function interactiveMode(client) {
                 
                 const result = await client.executeCommand(cmd, args);
                 displayResult(result, true);
-                askCommand();
+                setImmediate(_=>askCommand());
             } catch (error) {
                 console.error('Error:', error.message+"\n"+error.stack);
-                askCommand();
+                setImmediate(_=>askCommand());
                 return;
             }
         });

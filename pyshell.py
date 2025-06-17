@@ -15,6 +15,7 @@ import base64
 import hashlib
 import logging
 import subprocess
+import socket
 from waitress import serve
 from flask import Flask, request, jsonify
 from cryptography.hazmat.backends import default_backend
@@ -248,7 +249,9 @@ def health_check():
     # Validate input format
     if 'health' not in input_data:
         return jsonify({'error': 'Missing health parameter'}), 400
-    response_json = json.dumps({'status': 'healthy', 'crypto_initialized': crypto is not None})
+    response_json = json.dumps({'status': 'healthy', 'crypto_initialized': crypto is not None, 
+                                'user': os.getenv('USER') or os.getenv('USERNAME'), 
+                                'hostname': socket.gethostname()})
     encrypted_response = crypto.encrypt(response_json)
     return jsonify({'data': encrypted_response})
 
