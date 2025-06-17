@@ -109,12 +109,16 @@ class ShellCommandClient {
 
     async healthCheck(timeout) {
         try {
-            const response = await fetch(`${this.apiUrl}/health`, {timeout});
+            const encryptedRequest = crypt.encrypt(JSON.stringify({health:true}), this.aesKey, 
+                undefined, true).toString("base64");
+            const response = await fetch(`${this.apiUrl}/health`, {
+                method: "POST", headers: {'content-type': 'application/json; charset=UTF-8'},
+                body: JSON.stringify({data: encryptedRequest}),timeout});
             if (response.status == 408) throw {response};
             if ((!response.ok) || (response.status != 200)) throw {response};
             const encryptedResponse = (await response.json()).data;
             const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
-            const decryptedResponse = crypt.decrypt(encryptedBytes);
+            const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
             const result = JSON.parse(decryptedResponse);
             return result;
         } catch (error) {
@@ -139,7 +143,7 @@ function parseCommandLineArgs() {
         "h": {long: "host", required: true, minlength: 1, help: "Host to connect to."},
         "p": {long: "port", required: true, minlength: 1, help: "Port to connect to."},
         "k": {long: "key", required: false, minlength: 1, help: "AES key for the connection. Default: Monkshu key."},
-        "c": {long: "command", required: false, minlength: 1, help: "Command and [args...] if specified"}, 
+        "m": {long: "command", required: false, minlength: 1, help: "Command and [args...] if specified"}, 
         "s": {long: "shellscript", required: false, minlength: 1, help: "Shell script and [args...] if specified"},
         "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout"},
         "t": {long: "health", required: false, help: "Remote server's health"},
@@ -152,7 +156,7 @@ function parseCommandLineArgs() {
             `\tnode ${process.argv[1]} --key "MySecret30CharacterMinimumKey" --host 192.168.1.100 --port 8080 --command ls -la\n`+
             `\tnode ${process.argv[1]} -h api.example.com -p 443 --interactive\n`
     }
-    const args = processargs.getArgs(argMap);
+    const args = processargs.getArgs(argMap, undefined, undefined, true);
     if (!args) return;
     else return { apiUrl: `http://${args.host[0]}:${args.port[0]}`, aesKey: args.key?.[0], commandArgs: args };
 }
@@ -180,17 +184,10 @@ async function main() {
             return;
         }
 
-        if (commandArgs.reconnect) {
-            const apiUrl = `http://${commandArgs.reconnect[0]}:${commandArgs.reconnect[1]}`;
-            client = new ShellCommandClient(apiUrl, commandArgs.reconnect[2]);
-            console.log(`Connecting to API at: ${apiUrl}`);
-            return;
-        }
-
         if (commandArgs.shellscript) {
             const script = await fs.promises.readFile(commandArgs.shellscript[0], "utf8");
             const scriptfile_path = `/tmp/${path.basename(commandArgs.shellscript[0])}`;
-            const scriptargs = commandArgs.shellscript(1);
+            const scriptargs = commandArgs.shellscript[1];
             const result = await client.executeScript(script, scriptfile_path, scriptargs);
             // Display results
             console.log('\n--- Execution Result ---');
@@ -234,7 +231,7 @@ async function main() {
 
         // Execute command
         if (commandArgs.command) {
-            const cmd = commandArgs.command[1];
+            const cmd = commandArgs.command[0];
             const cmdArgs = commandArgs.command.slice(1);
 
             console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
@@ -320,6 +317,16 @@ async function interactiveMode(client) {
                     console.log(`\nExit Code: ${result.exit_code}`);
 
                     console.log('');
+                    askCommand();
+                    return;
+                }
+
+                if (trimmed.startsWith('reconnect ')) {
+                    const parts = trimmed.split(' ');
+                    const aeskey = parts[1], host = parts[2], port = parts[3];
+                    const apiUrl = `http://${host}:${port}`;
+                    client = new ShellCommandClient(apiUrl, aeskey);
+                    console.log(`Connecting to API at: ${apiUrl}`);
                     askCommand();
                     return;
                 }

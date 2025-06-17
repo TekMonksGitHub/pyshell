@@ -35,7 +35,7 @@ class AESCrypto:
         # Use MD5 with UTF-8 encoding, convert digest to hex and uppercase
         md5_hash = hashlib.md5(key_string.encode('utf-8')).hexdigest().upper()
         # Use the hex string as the key (32 bytes for AES-256)
-        self.key = md5_hash.encode('ascii')
+        self.key = md5_hash.encode('utf8')
     
     def encrypt(self, plaintext):
         """Encrypt plaintext string and return base64 encoded result"""
@@ -124,6 +124,20 @@ def load_config():
         logger.error(f"Failed to load configuration: {e}")
         raise
 
+def decrypt_incoming(request):
+    # Get encrypted data from request
+    if not request.is_json:
+        raise TypeError('Content-Type must be application/json')
+    
+    encrypted_input = request.json.get('data')
+    if not encrypted_input:
+        raise TypeError('Missing encrypted data field')
+    
+    # Decrypt input
+    decrypted_input = crypto.decrypt(encrypted_input)
+    input_data = json.loads(decrypted_input)
+    return input_data
+
 def execute_command(cmd, args, timeout=proctimeout):
     """Execute shell command safely and return result"""
     try:
@@ -162,17 +176,7 @@ def execute_command(cmd, args, timeout=proctimeout):
 def execute_endpoint():
     """Main API endpoint for encrypted command execution"""
     try:
-        # Get encrypted data from request
-        if not request.is_json:
-            return jsonify({'error': 'Content-Type must be application/json'}), 400
-        
-        encrypted_input = request.json.get('data')
-        if not encrypted_input:
-            return jsonify({'error': 'Missing encrypted data field'}), 400
-        
-        # Decrypt input
-        decrypted_input = crypto.decrypt(encrypted_input)
-        input_data = json.loads(decrypted_input)
+        input_data = decrypt_incoming(request)
         
         # Validate input format
         if 'cmd' not in input_data:
@@ -202,17 +206,7 @@ def execute_endpoint():
 def shellscript_endpoint():
     """Main API endpoint for encrypted shell script execution"""
     try:
-        # Get encrypted data from request
-        if not request.is_json:
-            return jsonify({'error': 'Content-Type must be application/json'}), 400
-        
-        encrypted_input = request.json.get('data')
-        if not encrypted_input:
-            return jsonify({'error': 'Missing encrypted data field'}), 400
-        
-        # Decrypt input
-        decrypted_input = crypto.decrypt(encrypted_input)
-        input_data = json.loads(decrypted_input)
+        input_data = decrypt_incoming(request)
         
         # Validate input format
         if 'script' not in input_data:
@@ -246,9 +240,14 @@ def shellscript_endpoint():
         logger.error(f"Request processing error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/health', methods=['GET'])
+@app.route('/health', methods=['POST'])
 def health_check():
     """Health check endpoint"""
+    input_data = decrypt_incoming(request)
+    
+    # Validate input format
+    if 'health' not in input_data:
+        return jsonify({'error': 'Missing health parameter'}), 400
     response_json = json.dumps({'status': 'healthy', 'crypto_initialized': crypto is not None})
     encrypted_response = crypto.encrypt(response_json)
     return jsonify({'data': encrypted_response})

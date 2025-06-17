@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             "env": {
-                "PYSHELL_CRYPT_KEY": "21887als2141rwq294938jwkj3029rqsnj",
+                "PYSHELL_CRYPT_KEY": "MyMinimum30CharacterAESKey1234",
                 "PYSHELL_HOST": "0.0.0.0",
                 "PYSHELL_PORT": "5050",
                 "PYSHELL_PROC_TIMEOUT": "1800"
@@ -21,7 +21,7 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch JS Client",
+            "name": "Launch JS Client - ls command",
             "skipFiles": [
                 "<node_internals>/**"
             ],
@@ -33,9 +33,30 @@
                 "-p",
                 "5050",
                 "-k",
-                "21887als2141rwq294938jwkj3029rqsnj",
+                "MyMinimum30CharacterAESKey1234",
+                "-m",
                 "ls",
                 "-al"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client - health command",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "5050",
+                "-k",
+                "MyMinimum30CharacterAESKey1234",
+                "-t"
             ]
         }
     ]
