@@ -25,17 +25,13 @@ const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async executeCommand(cmd, args = [], timeout) {
+    async fetchRequest(requestData, endpoint, timeout) {
         try {
-            // Prepare request data
-            const requestData = {cmd: cmd, args: Array.isArray(args) ? args : [args]};
-
-            // Encrypt request
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
                 undefined, true).toString("base64");
 
             // Send HTTP request
-            const response = await fetch(`${this.apiUrl}/execute`, {
+            const response = await fetch(`${this.apiUrl}/${endpoint}`, {
                 method: "POST",
                 headers: {'content-type': 'application/json; charset=UTF-8'},
                 body: JSON.stringify({data: encryptedRequest}),
@@ -49,9 +45,7 @@ class ShellCommandClient {
             const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
             const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
             const result = JSON.parse(decryptedResponse);
-
             return result;
-
         } catch (error) {
             if (error.response) {
                 // HTTP error response
@@ -64,66 +58,23 @@ class ShellCommandClient {
                 throw new Error(`Client Error: ${error.message}`);
             }
         }
+    } 
+
+    async executeCommand(cmd, args = [], timeout) {
+        // Prepare request data
+        const requestData = {cmd: cmd, args: Array.isArray(args) ? args : [args]};
+        return await this.fetchRequest(requestData, "execute", timeout);
     }
 
     async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", timeout) {
-        try {
-            // Prepare request data
-            const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell};
-
-            // Encrypt request
-            const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
-                undefined, true).toString("base64");
-
-            // Send HTTP request
-            const response = await fetch(`${this.apiUrl}/shellscript`, {
-                method: "POST",
-                headers: {'content-type': 'application/json; charset=UTF-8'},
-                body: JSON.stringify({data: encryptedRequest}),
-                timeout
-            });
-            if (response.status == 408) throw {request: encryptedRequest};
-            if ((!response.ok) || (response.status != 200)) throw {response};
-
-            // Decrypt response
-            const encryptedResponse = (await response.json()).data;
-            const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
-            const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
-            const result = JSON.parse(decryptedResponse);
-
-            return result;
-
-        } catch (error) {
-            if (error.response) {
-                // HTTP error response
-                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-            } else if (error.request) {
-                // Network error
-                throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
-            } else {
-                // Other error
-                throw new Error(`Client Error: ${error.message}`);
-            }
-        }
+        // Prepare request data
+        const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell};
+        return await this.fetchRequest(requestData, "shellscript", timeout);
     }
 
     async healthCheck(timeout) {
-        try {
-            const encryptedRequest = crypt.encrypt(JSON.stringify({health:true}), this.aesKey, 
-                undefined, true).toString("base64");
-            const response = await fetch(`${this.apiUrl}/health`, {
-                method: "POST", headers: {'content-type': 'application/json; charset=UTF-8'},
-                body: JSON.stringify({data: encryptedRequest}),timeout});
-            if (response.status == 408) throw {response};
-            if ((!response.ok) || (response.status != 200)) throw {response};
-            const encryptedResponse = (await response.json()).data;
-            const encryptedBytes = Buffer.from(encryptedResponse, 'base64');
-            const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
-            const result = JSON.parse(decryptedResponse);
-            return result;
-        } catch (error) {
-            throw new Error(`Health check failed: ${error.message}`);
-        }
+        const requestData = {health: true};
+        return await this.fetchRequest(requestData, "health", timeout);
     }
 
     async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
@@ -161,6 +112,23 @@ function parseCommandLineArgs() {
     else return { apiUrl: `http://${args.host[0]}:${args.port[0]}`, aesKey: args.key?.[0], commandArgs: args };
 }
 
+// Display results to the console
+function displayResult(result) {
+    // Display results
+    console.log('\n--- Execution Result ---');
+    console.log(`Exit Code: ${result.exit_code}`);
+    
+    if (result.stdout) {
+        console.log('\nStdout:');
+        console.log(result.stdout);
+    }
+    
+    if (result.stderr) {
+        console.log('\nStderr:');
+        console.log(result.stderr);
+    }
+}
+
 // CLI Interface
 async function main() {
     try {
@@ -189,19 +157,7 @@ async function main() {
             const scriptfile_path = `/tmp/${path.basename(commandArgs.shellscript[0])}`;
             const scriptargs = commandArgs.shellscript[1];
             const result = await client.executeScript(script, scriptfile_path, scriptargs);
-            // Display results
-            console.log('\n--- Execution Result ---');
-            console.log(`Exit Code: ${result.exit_code}`);
-            
-            if (result.stdout) {
-                console.log('\nStdout:');
-                console.log(result.stdout);
-            }
-            
-            if (result.stderr) {
-                console.log('\nStderr:');
-                console.log(result.stderr);
-            }
+            displayResult(result);
             return;
         }
 
@@ -213,19 +169,7 @@ async function main() {
             const pyshell_process_default_timeout = dpArgs[9] || 1800;
             const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
                 pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
-            // Display results
-            console.log('\n--- Deployment Result ---');
-            console.log(`Exit Code: ${result.exit_code}`);
-
-            if (result.stdout) {
-                console.log('\nStdout:');
-                console.log(result.stdout);
-            }
-            
-            if (result.stderr) {
-                console.log('\nStderr:');
-                console.log(result.stderr);
-            }
+            displayResult(result);
             return;
         }
 
@@ -236,20 +180,8 @@ async function main() {
 
             console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
             const result = await client.executeCommand(cmd, cmdArgs);
-
-            // Display results
-            console.log('\n--- Execution Result ---');
-            console.log(`Exit Code: ${result.exit_code}`);
-            
-            if (result.stdout) {
-                console.log('\nStdout:');
-                console.log(result.stdout);
-            }
-            
-            if (result.stderr) {
-                console.log('\nStderr:');
-                console.log(result.stderr);
-            }
+            displayResult(result); 
+            return;
         }
 
     } catch (error) {
