@@ -5,19 +5,20 @@ AES256 Encrypted Shell Command API
 Receives encrypted JSON requests to execute shell commands and returns encrypted responses.
 
 AI Generated - Claude then manually modified.
+(C) Tekmonks. All rights reserved.
 """
 
+import os
 import sys
 import json
-import subprocess
 import base64
 import hashlib
-from flask import Flask, request, jsonify
-from waitress import serve
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-import os
 import logging
+import subprocess
+from waitress import serve
+from flask import Flask, request, jsonify
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 app = Flask(__name__)
 
@@ -262,7 +263,18 @@ def internal_error(error):
 
 if __name__ == '__main__':
     # Load configuration on startup
-    load_config()
+    try:
+        load_config()
+    except Exception as e:
+        print('\nUsage:   pyshell.py [AES Key] [Host to listen on] [Port to listen on]')
+        print('Example: pyshell.py "My_Minimum_30_Character_AES_Key" 0.0.0.0 5050')
+        print('\nHelp')
+        print('----')
+        print('Configuration file config.json with keys host, port and encryption_key in the same folder')
+        print('or the environment variable PYSHELL_CONFIG_FILE pointing to its path.')
+        print('\nEnvironment variables PYSHELL_CRYPT_KEY, PYSHELL_HOST and PYSHELL_PORT otherwise.')
+        print('\nOrder of priroities is command line argument > environment variable > configuration file.')
+        sys.exit(1)
     
     # Run the Flask app
     logger.info(f"Starting on {host}:{port} proctimeout {proctimeout} sec")

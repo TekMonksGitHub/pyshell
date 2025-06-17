@@ -7,6 +7,7 @@
  * AI Generated - Claude then manually modified.
  * 
  * Needs Monkshu libraries - crypt and httpClient
+ * (C) Tekmonks. All rights reserved.
  */
 
 if ((!global.CONSTANTS) && (!process.env.MONKSHU_HOME)) {console.error("\nError: MONKSHU_HOME not set.\n"); process.exit(1);}
