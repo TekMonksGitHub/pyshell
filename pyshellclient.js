@@ -200,16 +200,8 @@ async function interactiveMode(client) {
     const askCommand = () => {
         rl.question('> ', async (input) => {
             const trimmed = input.trim();
-            
-            if (trimmed === 'exit' || trimmed === 'quit') {
-                rl.close();
-                return;
-            }
-            
-            if (trimmed === '') {
-                askCommand();
-                return;
-            }
+            if (trimmed === 'exit' || trimmed === 'quit') {rl.close(); return;}
+            if (trimmed === '') {askCommand(); return;}
 
             try {
                 if (trimmed.startsWith('shellscript ')) {
@@ -289,6 +281,4 @@ async function interactiveMode(client) {
 module.exports = { ShellCommandClient };
 
 // Run CLI if called directly
-if (require.main === module) {
-    main();
-}
+if (require.main === module) {main();}
