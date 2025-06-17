@@ -184,6 +184,7 @@ async function main() {
             return;
         }
 
+        console.error("Error: Unknown command");
     } catch (error) {
         console.error('Error:', error.message);
         process.exit(1);
