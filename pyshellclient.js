@@ -113,20 +113,13 @@ function parseCommandLineArgs() {
 }
 
 // Display results to the console
-function displayResult(result) {
+function displayResult(result, interactive) {
     // Display results
-    console.log('\n--- Execution Result ---');
-    console.log(`Exit Code: ${result.exit_code}`);
-    
-    if (result.stdout) {
-        console.log('\nStdout:');
-        console.log(result.stdout);
-    }
-    
-    if (result.stderr) {
-        console.log('\nStderr:');
-        console.log(result.stderr);
-    }
+    if (!interactive) console.log('\n--- Execution Result ---');
+
+    if (result.stdout) console.log(`${!interactive?'\n':''}Stdout: \n${result.stdout}`);
+    if (result.stderr) console.log(`${!interactive?'\n':''}Stderr: \n${result.stderr}`);
+    console.log(`${!interactive?'':'\n'}Exit Code: ${result.exit_code}${!interactive?'':'\n'}`);
 }
 
 // CLI Interface
@@ -225,12 +218,7 @@ async function interactiveMode(client) {
                     const script = await fs.promises.readFile(scriptPath, "utf8");
                     const remoteScriptPath = "/tmp/"+path.basename(scriptPath);
                     const result = await client.executeScript(script, remoteScriptPath, parts.slice(2));
-
-                    if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
-                    if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
-                    console.log(`\nExit Code: ${result.exit_code}`);
-
-                    console.log('');
+                    displayResult(result, true);
                     askCommand();
                     return;
                 }
@@ -245,11 +233,7 @@ async function interactiveMode(client) {
                     const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
                         pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
                     // Display results
-                    if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
-                    if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
-                    console.log(`\nExit Code: ${result.exit_code}`);
-
-                    console.log('');
+                    displayResult(result, true);
                     askCommand();
                     return;
                 }
@@ -263,13 +247,8 @@ async function interactiveMode(client) {
                     askCommand();
                     return;
                 }
-            } catch (error) {
-                console.error('Error:', error.message+"\n"+error.stack);
-                askCommand();
-                return;
-            }
 
-            try {
+                // now it is executed as a command line command
                 let parts = trimmed.split(' ');
                 const cmd = parts[0]; parts = parts.slice(1);
                 const args = [];
@@ -293,18 +272,13 @@ async function interactiveMode(client) {
                 if (argsToCombine.length) args.push(argsToCombine.join(' '));
                 
                 const result = await client.executeCommand(cmd, args);
-                
-                if (result.stdout) console.log(`Stdout: \n${result.stdout}`);
-                if (result.stderr) console.log(`Stderr: \n${result.stderr}`);
-                console.log(`\nExit Code: ${result.exit_code}`);
-
-                console.log('');
-                
+                displayResult(result, true);
+                askCommand();
             } catch (error) {
                 console.error('Error:', error.message+"\n"+error.stack);
+                askCommand();
+                return;
             }
-            
-            askCommand();
         });
     };
 
