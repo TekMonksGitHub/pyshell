@@ -19,7 +19,7 @@ const util = require("util");
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
 const processargs = require(`${MONKSHULIBDIR}/processargs.js`);
 const execasync = util.promisify(require("child_process").exec);
-global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
+if (require.main === module) global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
 class ShellCommandClient {
@@ -198,7 +198,7 @@ async function interactiveMode(client) {
     console.log('Example: ls -la\n');
 
     const askCommand = async () => {
-        const health = await client.healthCheck()
+        const health = await client.healthCheck();
         rl.question(`${health.user+'@'+health.hostname} # `, async (input) => {
             const trimmed = input.trim();
             if (trimmed === 'exit' || trimmed === 'quit') {rl.close(); return;}

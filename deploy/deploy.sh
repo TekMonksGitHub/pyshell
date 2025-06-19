@@ -36,7 +36,7 @@ function exitFailed() {
 }
 
 
-if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$ID@$HOST" -p $SSHPORT "bash -c \"mkdir -p \\\"$PYSHELLDIR\\\"\""; then 
+if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$ID@$HOST" -p $SSHPORT "bash -c \"mkdir -p \\\"$PYSHELL_PATH\\\"\""; then 
     exitFailed "Remote directory creation failed"
 fi
 
