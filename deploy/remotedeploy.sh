@@ -36,7 +36,7 @@ if ! /usr/bin/env python3 -m venv "$PYSHELL_PATH/venv"; then
     exitFailed "Python virtual environment creation failed"
 fi 
 
-if ! "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress; then
+if ! "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress psutil; then
     exitFailed "Python pip install in the virtual environment failed"
 fi 
 

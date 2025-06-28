@@ -12,10 +12,11 @@ import os
 import sys
 import json
 import base64
+import socket
 import hashlib
 import logging
 import subprocess
-import socket
+from io import StringIO
 from waitress import serve
 from flask import Flask, request, jsonify
 from cryptography.hazmat.backends import default_backend
@@ -145,33 +146,24 @@ def execute_command(cmd, args, timeout=proctimeout):
         # Combine command and arguments
         full_command = [cmd] + args if isinstance(args, list) else [cmd, args]
         
-        # Execute command with timeout and security measures
-        result = subprocess.run(
-            full_command,
-            capture_output=True,
-            text=True,
-            timeout=timeout, 
-            check=False  # Don't raise exception on non-zero exit
-        )
-        
-        return {
-            'exit_code': result.returncode,
-            'stdout': result.stdout,
-            'stderr': result.stderr
-        }
+        # Execute command with timeout and security measures, don't check i.e. raise exception on non-zero exit
+        result = subprocess.run(full_command, capture_output=True, text=True, timeout=timeout, check=False)
+        return { 'exit_code': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr }
         
     except subprocess.TimeoutExpired:
-        return {
-            'exit_code': -1,
-            'stdout': '',
-            'stderr': 'Command timed out after 30 seconds'
-        }
+        return { 'exit_code': -1,'stdout': '', 'stderr': f'Command timed out after ${timeout} seconds' }
     except Exception as e:
-        return {
-            'exit_code': -1,
-            'stdout': '',
-            'stderr': f'Execution error: {str(e)}'
-        }
+        return { 'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}' }
+
+def execute_pycommand(cmd, args, timeout=proctimeout):
+    try: 
+        old_stdout = sys.stdout
+        redirected_output = sys.stdout = StringIO()
+        exec(cmd, args, {})
+        sys.stdout = old_stdout
+        return { 'exit_code': 0, 'stdout': redirected_output.getvalue(), 'stderr': '' }
+    except Exception as e: 
+        return { 'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}' }
 
 @app.route('/execute', methods=['POST'])
 def execute_endpoint():
@@ -180,16 +172,17 @@ def execute_endpoint():
         input_data = decrypt_incoming(request)
         
         # Validate input format
-        if 'cmd' not in input_data:
-            return jsonify({'error': 'Missing cmd parameter'}), 400
+        if 'cmd' not in input_data and 'pycmd' not in input_data:
+            return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
         
-        cmd = input_data['cmd']
-        args = input_data.get('args', [])
+        cmd_type = 'oscmd' if 'cmd' in input_data else 'pycmd'
+        cmd = input_data.get('cmd') or input_data.get('pycmd')
+        args = input_data.get('args', [] if cmd_type == 'oscmd' else {})
         timeout = input_data.get('timeout', proctimeout)
-        
+
         # Execute command
         logger.info(f"Executing: {request.remote_addr} -> {cmd} {args}")
-        result = execute_command(cmd, args, timeout)
+        result = execute_command(cmd, args, timeout) if cmd_type == 'oscmd' else execute_pycommand(cmd, args, timeout)
         
         # Encrypt response
         response_json = json.dumps(result)

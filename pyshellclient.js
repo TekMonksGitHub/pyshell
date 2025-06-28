@@ -22,10 +22,12 @@ const execasync = util.promisify(require("child_process").exec);
 if (require.main === module) global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
+const DEFAULT_TIMEOUT_HEALTH = 1000, DEFAULT_TIMEOUT = 600000;     // 1 second for health and 10 minutes otherwise
+
 class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async fetchRequest(requestData, endpoint, timeout) {
+    async fetchRequest(requestData, endpoint, timeout=DEFAULT_TIMEOUT) {
         try {
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
                 undefined, true).toString("base64");
@@ -60,19 +62,25 @@ class ShellCommandClient {
         }
     } 
 
-    async executeCommand(cmd, args = [], timeout) {
+    async executeCommand(cmd, args = [], timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
-        const requestData = {cmd: cmd, args: Array.isArray(args) ? args : [args]};
+        const requestData = {cmd, args: Array.isArray(args) ? args : [args], timeout: timeout+100};
         return await this.fetchRequest(requestData, "execute", timeout);
     }
 
-    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", timeout) {
+    async executePyCommand(pycmd, args = {}, timeout=DEFAULT_TIMEOUT) {
+        // Prepare request data
+        const requestData = {pycmd, args};
+        return await this.fetchRequest(requestData, "execute", timeout);
+    }
+
+    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
         const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell};
         return await this.fetchRequest(requestData, "shellscript", timeout);
     }
 
-    async healthCheck(timeout) {
+    async healthCheck(timeout=DEFAULT_TIMEOUT_HEALTH) {
         const requestData = {health: true};
         return await this.fetchRequest(requestData, "health", timeout);
     }
@@ -94,7 +102,8 @@ function parseCommandLineArgs() {
         "h": {long: "host", required: true, minlength: 1, help: "Host to connect to."},
         "p": {long: "port", required: true, minlength: 1, help: "Port to connect to."},
         "k": {long: "key", required: false, minlength: 1, help: "AES key for the connection. Default: Monkshu key."},
-        "m": {long: "command", required: false, minlength: 1, help: "Command and [args...] if specified"}, 
+        "m": {long: "command", required: false, minlength: 1, help: "Shell command and [args...] if specified"}, 
+        "y": {long: "pycommand", required: false, minlength: 1, help: "Python code and [args...] if specified"}, 
         "s": {long: "shellscript", required: false, minlength: 1, help: "Shell script and [args...] if specified"},
         "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout"},
         "t": {long: "health", required: false, help: "Remote server's health"},
@@ -166,7 +175,25 @@ async function main() {
             return;
         }
 
-        // Execute command
+        // Execute Python command
+        if (commandArgs.pycommand) {
+            const cmd = commandArgs.pycommand[0];
+            const cmdArgs = {};
+            try {
+                if (commandArgs.pycommand[1]) for (const cmdArgTuple of commandArgs.pycommand[1].split(",")) 
+                    cmdArgs[cmdArgTuple.split("=")[0].trim()] = cmdArgs[cmdArgTuple.split("=")[1].trim()];
+            } catch (error) {
+                console.error(`Bad command arguments => ${commandArgs.pycommand[1]}`); 
+                return;
+            }
+
+            console.log(`Executing: ${commandArgs.pycommand.join(' ')}`);
+            const result = await client.executePyCommand(cmd, cmdArgs);
+            displayResult(result); 
+            return;
+        }
+
+        // Execute OS command
         if (commandArgs.command) {
             const cmd = commandArgs.command[0];
             const cmdArgs = commandArgs.command.slice(1);
@@ -182,6 +209,29 @@ async function main() {
         console.error('Error:', error.message);
         process.exit(1);
     }
+}
+
+function getArgsParsingQuotes(parts) {
+    const args = [];
+    const _countEndingSlashes = str => {
+        let count = 0, index = str.length-1; 
+        while (index >= 0) {if (str[index] == '\\') count++; else break; index--;}
+        return count; 
+    }
+
+    let quoteChar, argsToCombine = []; for (let part of parts) {
+        part = part.trim(); 
+        if ((part.startsWith('"') || part.startsWith("'")) && (!quoteChar)) {argsToCombine = [part.substring(1)]; quoteChar = part[0]}
+        else if ((part.endsWith('"') || part.endsWith("'")) && (quoteChar) && 
+                (quoteChar == part[part.length-1]) && 
+                (_countEndingSlashes(part.substring(0,part.length-1))%2 != 1)) {
+            argsToCombine.push(part.substring(0, part.length-1)); args.push(argsToCombine.join(' ')); 
+            quoteChar = undefined; argsToCombine = [];
+        }
+        else {if (quoteChar) argsToCombine.push(part); else args.push(part);}
+    }
+    if (argsToCombine.length) args.push(argsToCombine.join(' '));
+    return args;
 }
 
 // Interactive mode
@@ -248,29 +298,26 @@ async function interactiveMode(client) {
                     return;
                 }
 
+                if (trimmed.startsWith('pycommand ')) {
+                    let parts = trimmed.split(' ');
+                    const cmdAndArgs = getArgsParsingQuotes(parts.slice(1));
+                    const cmd = cmdAndArgs[0], args = cmdAndArgs[1];
+                    const cmdArgs = {};
+                    try {
+                        if (args) for (const cmdArgTuple of args.split(",")) 
+                            cmdArgs[cmdArgTuple.split("=")[0].trim()] = cmdArgs[cmdArgTuple.split("=")[1].trim()];
+                    } catch (error) {console.error(`Bad command arguments => ${commandArgs.command.command[1]}`); return;}
+
+                    const result = await client.executePyCommand(cmd, cmdArgs);
+                    displayResult(result, true);
+                    setImmediate(_=>askCommand());
+                    return;
+                }
+
                 // now it is executed as a command line command
                 let parts = trimmed.split(' ');
                 const cmd = parts[0]; parts = parts.slice(1);
-                const args = [];
-                const _countEndingSlashes = str => {
-                    let count = 0, index = str.length-1; 
-                    while (index >= 0) {if (str[index] == '\\') count++; else break; index--;}
-                    return count; 
-                }
-
-                let quoteChar, argsToCombine = []; for (let part of parts) {
-                    part = part.trim(); 
-                    if ((part.startsWith('"') || part.startsWith("'")) && (!quoteChar)) {argsToCombine = [part.substring(1)]; quoteChar = part[0]}
-                    else if ((part.endsWith('"') || part.endsWith("'")) && (quoteChar) && 
-                            (quoteChar == part[part.length-1]) && 
-                            (_countEndingSlashes(part.substring(0,part.length-1))%2 != 1)) {
-                        argsToCombine.push(part.substring(0, part.length-1)); args.push(argsToCombine.join(' ')); 
-                        quoteChar = undefined; argsToCombine = [];
-                    }
-                    else {if (quoteChar) argsToCombine.push(part); else args.push(part);}
-                }
-                if (argsToCombine.length) args.push(argsToCombine.join(' '));
-                
+                const args = getArgsParsingQuotes(parts);
                 const result = await client.executeCommand(cmd, args);
                 displayResult(result, true);
                 setImmediate(_=>askCommand());
