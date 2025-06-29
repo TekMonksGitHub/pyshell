@@ -138,3 +138,13 @@ const client = new ShellCommandClient('http://api.example.com:8080', aesKey);
 const result = await client.executeScript("#!/bin/bash\necho Hello\nbash -c $1", "/tmp/test.sh", ["ls"]);
 console.log(result);
 ```
+
+
+Running python scripts remotely (in-process so faster)
+```
+const { ShellCommandClient } = require('./client');
+
+const client = new ShellCommandClient('http://api.example.com:8080', aesKey);
+const result = await client.executePyCommand("#!/usr/bin/env python3\nprint(helloVar)", {helloVar: "Hello"});
+console.log(result);
+```

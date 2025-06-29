@@ -15,6 +15,7 @@ import base64
 import socket
 import hashlib
 import logging
+import tempfile
 import subprocess
 from io import StringIO
 from waitress import serve
@@ -213,14 +214,18 @@ def shellscript_endpoint():
         cmd_shell = input_data.get('shell', "/bin/bash")
         timeout = input_data.get('timeout', proctimeout)
         scriptfile_path = input_data['scriptfile_path']
+        scriptfile_extension = os.path.splitext(scriptfile_path)[1]
+        tmp_scriptfile_path = tempfile.NamedTemporaryFile(suffix=scriptfile_extension).name
 
-        fileout = open(scriptfile_path, "w")
+        fileout = open(tmp_scriptfile_path, "w")
         fileout.write(script)
         fileout.close()
         
         # Execute command
         logger.info(f"Executing script: {request.remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
-        result = execute_command(cmd_shell, [scriptfile_path]+args, timeout)
+        result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout)
+        try: os.remove(tmp_scriptfile_path)
+        except Exception as e: logger.warning(f"Unable to remove temporary file {tmp_scriptfile_path}")
         
         # Encrypt response
         response_json = json.dumps(result)
