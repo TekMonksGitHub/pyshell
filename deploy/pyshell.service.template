@@ -9,6 +9,8 @@ Restart=always
 RestartSec=1
 User={{PYSHELL_ID}}
 ExecStart="{{PYTHON3_VENV_BIN}}/python3" "{{PYSHELL_PATH}}/pyshell.py" {{PYSHELL_KEY}} {{PYSHELL_HOST}} {{PYSHELL_PORT}} {{PYSHELL_TIMEOUT}}
+StandardOutput=append:/var/log/pyshell.log
+StandardError=append:/var/log/pyshell.log
 
 [Install]
 WantedBy=multi-user.target

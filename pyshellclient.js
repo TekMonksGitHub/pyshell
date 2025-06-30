@@ -51,7 +51,7 @@ class ShellCommandClient {
         } catch (error) {
             if (error.response) {
                 // HTTP error response
-                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data||"")}`);
             } else if (error.request) {
                 // Network error
                 throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
