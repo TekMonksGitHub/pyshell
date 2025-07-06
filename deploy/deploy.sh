@@ -23,18 +23,20 @@ SSHPORT=$2
 ID=$3
 PASS=$4
 PYSHELL_PATH=$5
-PYSHELL_KEY=$6
-PYSHELL_HOST=$7
-PYSHELL_PORT=$8
-PYSHELL_ID=$9
+PYSHELL_ID=$6
+PYSHELL_KEY=$7
+PYSHELL_HOST=$8
+PYSHELL_PORT=$9
 PYSHELL_TIMEOUT="${10:-1800}"
-
 
 function exitFailed() {
     echo "${1:-Failed}"
     exit 1
 }
 
+if sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$ID@$HOST" -p $SSHPORT "systemctl list-unit-files pyshell.service --no-legend 2>/dev/null | grep -q pyshell.service"; then
+    exit 0
+fi
 
 if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$ID@$HOST" -p $SSHPORT "bash -c \"mkdir -p \\\"$PYSHELL_PATH\\\"\""; then 
     exitFailed "Remote directory creation failed"

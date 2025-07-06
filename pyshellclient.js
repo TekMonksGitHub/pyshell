@@ -142,6 +142,12 @@ async function main() {
         let client = new ShellCommandClient(apiUrl, aesKey);
         console.log(`Connecting to API at: ${apiUrl}`);
 
+        try {
+            await client.healthCheck(5000);
+        } catch (error) {
+            process.exit(1);
+        }
+
         // Handle special commands
         if (commandArgs.health) {
             const health = await client.healthCheck();
