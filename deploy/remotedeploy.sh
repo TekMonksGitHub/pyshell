@@ -36,7 +36,9 @@ if [ -f /etc/os-release ]; then
     ID_LIKE=$(grep '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '"')
     if [[ "$ID" == "debian" || "$ID_LIKE" == *"debian"* ]]; then
         echo "Running on a Debian-based system"
-        sudo DEBIAN_FRONTEND=noninteractive apt -qq -y install python3-venv
+        if ! dpkg -l | grep -qw python3-venv; then
+            sudo DEBIAN_FRONTEND=noninteractive apt -qq -y install python3-venv
+        fi  
     fi
 fi
 
