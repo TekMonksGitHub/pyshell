@@ -14,7 +14,7 @@
 #
 # Eg ./deploy.sh 91.232.105.77 64760 root \
 #       fjeoifeio90r8ropfp304fe2r9flko23fk03dqef /kloudust/system \
-#       root 48984jfkj90824edoj098398ioqjd902u821 0.0.0.0 64761 1800
+#       48984jfkj90824edoj098398ioqjd902u821 0.0.0.0 64761 root 1800
 
 SCRIPT_DIR=$(dirname "$0")
 PYSHELLDIR=$(realpath "$SCRIPT_DIR/../")
