@@ -6,10 +6,10 @@
 # 3 - ID to use to SSH
 # 4 - Password for this ID
 # 5 - Directory PYSHELL_PATH to deploy the shell files to
-# 6 - Pyshell's user
-# 7 - Pyshell's AES key
-# 8 - Pyshell's AES host
-# 9 - Pyshell's AES port
+# 6 - Pyshell's AES key
+# 7 - Pyshell's AES host
+# 8 - Pyshell's AES port
+# 9 - Pyshell's user
 # 10 - Pyshell's AES default process timeout (default: 1800)
 #
 # Eg ./deploy.sh 91.232.105.77 64760 root \
