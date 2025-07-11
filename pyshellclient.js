@@ -11,7 +11,7 @@
  */
 
 if ((!global.CONSTANTS) && (!process.env.MONKSHU_HOME)) {console.error("\nError: MONKSHU_HOME not set.\n"); process.exit(1);}
-const MONKSHULIBDIR = global.CONSTANTS ? CONSTANTS.LIBDIR : process.env.MONKSHU_HOME+"/backend/server/lib";
+const MONKSHULIBDIR = global.CONSTANTS?.MONKSHU_BACKEND ? global.CONSTANTS.LIBDIR : global.CONSTANTS?.MONKSHU_LIBDIR ? global.CONSTANTS.MONKSHU_LIBDIR : `${process.env.MONKSHU_HOME}/backend/server/lib`;
 
 const fs = require("fs");
 const path = require("path");
