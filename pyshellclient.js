@@ -19,7 +19,7 @@ const util = require("util");
 const crypt = require(`${MONKSHULIBDIR}/crypt.js`);
 const processargs = require(`${MONKSHULIBDIR}/processargs.js`);
 const execasync = util.promisify(require("child_process").exec);
-if (require.main === module) global.LOG = console; global.LOG.info = _=>{};  // this quitens the HTTP client info messages
+if (require.main === module) {global.LOG = console; global.LOG.info = _=>{};}  // this quitens the HTTP client info messages
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
 const DEFAULT_TIMEOUT_HEALTH = 1000, DEFAULT_TIMEOUT = 600000;     // 1 second for health and 10 minutes otherwise

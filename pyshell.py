@@ -273,7 +273,7 @@ if __name__ == '__main__':
         print('Configuration file config.json with keys host, port and encryption_key in the same folder')
         print('or the environment variable PYSHELL_CONFIG_FILE pointing to its path.')
         print('\nEnvironment variables PYSHELL_CRYPT_KEY, PYSHELL_HOST and PYSHELL_PORT otherwise.')
-        print('\nOrder of priroities is command line argument > environment variable > configuration file.')
+        print('\nOrder of priorities is command line argument > environment variable > configuration file.')
         sys.exit(1)
     
     # Run the Flask app
