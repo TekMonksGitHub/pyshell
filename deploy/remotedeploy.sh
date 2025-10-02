@@ -31,6 +31,17 @@ if ! sudo cp "$PYSHELL_PATH/pyshell.service" /lib/systemd/system/; then
     exitFailed "Service file copy to systemd failed"
 fi 
 
+if [ -f /etc/os-release ]; then
+    ID=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+    ID_LIKE=$(grep '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '"')
+    if [[ "$ID" == "debian" || "$ID_LIKE" == *"debian"* ]]; then
+        if ! dpkg -l | grep -qw python3-venv; then
+            echo "Installing python3-venv because it was not found."
+            sudo DEBIAN_FRONTEND=noninteractive apt -qq -y install python3-venv
+        fi  
+    fi
+fi
+
 rm -rf "$PYSHELL_PATH/venv"
 if ! /usr/bin/env python3 -m venv "$PYSHELL_PATH/venv"; then 
     exitFailed "Python virtual environment creation failed"
