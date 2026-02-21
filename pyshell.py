@@ -16,12 +16,14 @@ import socket
 import hashlib
 import logging
 import tempfile
+import threading
 import subprocess
 from io import StringIO
-from waitress import serve
-from flask import Flask, request, jsonify
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from concurrent import futures
+from waitress import serve # type: ignore
+from flask import Flask, request, jsonify # type: ignore
+from cryptography.hazmat.backends import default_backend # type: ignore
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes # type: ignore
 
 app = Flask(__name__)
 
@@ -83,28 +85,19 @@ class AESCrypto:
         except Exception as e:
             logger.error(f"Decryption error: {e}")
             raise
-    
-    def _pad(self, data):
-        """Add PKCS7 padding - Not used in CTR mode"""
-        padding_length = 16 - (len(data) % 16)
-        padding = bytes([padding_length] * padding_length)
-        return data + padding
-    
-    def _unpad(self, data):
-        """Remove PKCS7 padding - Not used in CTR mode"""
-        padding_length = data[-1]
-        return data[:-padding_length]
 
 # Global crypto instance
 crypto = None
 # Other globals
 host = '127.0.0.1'
 port = '5050'
-proctimeout = 1800  # 30 minutes default timeout
+PROC_TIMEOUT = 1800  # 30 minutes default timeout
+RESPONSE_TTL = 600  # 10 minutes autodelete response entries
+RESPONSES = {}
 
 def load_config():
     """Load encryption key from config file"""
-    global crypto, host, port, proctimeout
+    global crypto, host, port, PROC_TIMEOUT
     try:
         try:
             config_file = os.getenv('PYSHELL_CONFIG_FILE', 'config.json')
@@ -118,7 +111,7 @@ def load_config():
             raise ValueError("encryption_key not found in config file")
         host = (len(sys.argv)>2 and sys.argv[2]) or os.getenv('PYSHELL_HOST') or config.get('host') or host
         port = (len(sys.argv)>3 and sys.argv[3]) or os.getenv('PYSHELL_PORT') or config.get('port') or port
-        proctimeout = int((len(sys.argv)>4 and sys.argv[4]) or os.getenv('PYSHELL_PROC_TIMEOUT') or config.get('proc_timeout') or proctimeout)
+        PROC_TIMEOUT = int((len(sys.argv)>4 and sys.argv[4]) or os.getenv('PYSHELL_PROC_TIMEOUT') or config.get('proc_timeout') or PROC_TIMEOUT)
             
         crypto = AESCrypto(key)
         logger.info("Configuration loaded successfully")
@@ -141,7 +134,7 @@ def decrypt_incoming(request):
     input_data = json.loads(decrypted_input)
     return input_data
 
-def execute_command(cmd, args, timeout=proctimeout):
+def execute_command(cmd, args, timeout=PROC_TIMEOUT):
     """Execute shell command safely and return result"""
     try:
         # Combine command and arguments
@@ -156,40 +149,71 @@ def execute_command(cmd, args, timeout=proctimeout):
     except Exception as e:
         return { 'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}' }
 
-def execute_pycommand(cmd, args, timeout=proctimeout):
-    try: 
-        old_stdout = sys.stdout
+def execute_pycommand(cmd, args, timeout=PROC_TIMEOUT):
+    def run():
         redirected_output = sys.stdout = StringIO()
         exec(cmd, args, {})
-        sys.stdout = old_stdout
-        return { 'exit_code': 0, 'stdout': redirected_output.getvalue(), 'stderr': '' }
-    except Exception as e: 
-        return { 'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}' }
+        sys.stdout = sys.__stdout__
+        return {'exit_code': 0, 'stdout': redirected_output.getvalue(), 'stderr': ''}
+
+    try:
+        with futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(run).result(timeout=timeout)
+    except futures.TimeoutError:
+        return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution timed out after {timeout}s'}
+    except Exception as e:
+        return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}'}
 
 @app.route('/execute', methods=['POST'])
 def execute_endpoint():
     """Main API endpoint for encrypted command execution"""
     try:
         input_data = decrypt_incoming(request)
-        
-        # Validate input format
-        if 'cmd' not in input_data and 'pycmd' not in input_data:
-            return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
-        
-        cmd_type = 'oscmd' if 'cmd' in input_data else 'pycmd'
-        cmd = input_data.get('cmd') or input_data.get('pycmd')
-        args = input_data.get('args', [] if cmd_type == 'oscmd' else {})
-        timeout = input_data.get('timeout', proctimeout)
 
-        # Execute command
-        logger.info(f"Executing: {request.remote_addr} -> {cmd} {args}")
-        result = execute_command(cmd, args, timeout) if cmd_type == 'oscmd' else execute_pycommand(cmd, args, timeout)
+        # if we already have a cached response send it, no need to do anything else as the task is already running
+        if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
+            request_id = input_data.get("request_id")
+            encrypted_response = RESPONSES[request_id]["response"]
+            decrypted_response = json.loads(crypto.decrypt(encrypted_response)) 
+            if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
+            return jsonify({'data': encrypted_response})
         
-        # Encrypt response
-        response_json = json.dumps(result)
-        encrypted_response = crypto.encrypt(response_json)
-        
-        return jsonify({'data': encrypted_response})
+        def executeCmd(request_id, remote_addr):
+            # Validate input format
+            if 'cmd' not in input_data and 'pycmd' not in input_data:
+                return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
+            
+            cmd_type = 'oscmd' if 'cmd' in input_data else 'pycmd'
+            cmd = input_data.get('cmd') or input_data.get('pycmd')
+            args = input_data.get('args', [] if cmd_type == 'oscmd' else {})
+            timeout = input_data.get('timeout', PROC_TIMEOUT)
+
+            # Execute command
+            logger.info(f"Executing: {remote_addr} -> {cmd} {args}")
+            result = execute_command(cmd, args, timeout) if cmd_type == 'oscmd' else execute_pycommand(cmd, args, timeout)
+            
+            # Encrypt and store response
+            response_json = json.dumps(result)
+            encrypted_response = crypto.encrypt(response_json)
+            logger.info(f"Execution result of command ${cmd_type}: {cmd} is {response_json}")
+
+            # save the response for about 10 minutes or till RESPONSE_TTL
+            if request_id:  
+                RESPONSES[request_id] = {"response": encrypted_response}
+                threading.Timer(RESPONSE_TTL, lambda request_id=request_id: RESPONSES.pop(request_id, None)).start()
+            else: return encrypted_response
+
+        if input_data.get("request_id"):
+            request_id = input_data.get("request_id")
+            # execute the command but don't wait
+            threading.Thread(target=executeCmd, args=(request_id, request.remote_addr), daemon=True).start()  # run as a seperate thread
+            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting"}');
+            RESPONSES[request_id] = {"response": encrypted_response}
+            return jsonify({'data': encrypted_response})
+        else:
+            # await the command to return the result
+            encrypted_response = executeCmd(None, request.remote_addr)  # this is same as await executeCmd()
+            return jsonify({'data': encrypted_response})
         
     except json.JSONDecodeError:
         return jsonify({'error': 'Invalid JSON in decrypted data'}), 400
@@ -202,42 +226,69 @@ def shellscript_endpoint():
     """Main API endpoint for encrypted shell script execution"""
     try:
         input_data = decrypt_incoming(request)
-        
-        # Validate input format
-        if 'script' not in input_data:
-            return jsonify({'error': 'Missing script parameter'}), 400
-        if 'scriptfile_path' not in input_data:
-            return jsonify({'error': 'Missing script parameter'}), 400
-        
-        script = input_data['script']
-        args = input_data.get('args', [])
-        cmd_shell = input_data.get('shell', "/bin/bash")
-        timeout = input_data.get('timeout', proctimeout)
-        scriptfile_path = input_data['scriptfile_path']
-        scriptfile_extension = os.path.splitext(scriptfile_path)[1]
-        tmp_scriptfile_path = tempfile.NamedTemporaryFile(suffix=scriptfile_extension).name
 
-        fileout = open(tmp_scriptfile_path, "w")
-        fileout.write(script)
-        fileout.close()
+        # if we already have a cached response send it, no need to do anything else as the task is already running
+        if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
+            request_id = input_data.get("request_id")
+            encrypted_response = RESPONSES[request_id]["response"]
+            decrypted_response = json.loads(crypto.decrypt(encrypted_response))
+            if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
+            return jsonify({'data': encrypted_response})
+
+        def executeShellScript(request_id, remote_addr):
+            # Validate input format
+            if 'script' not in input_data:
+                return jsonify({'error': 'Missing script parameter'}), 400
+            if 'scriptfile_path' not in input_data:
+                return jsonify({'error': 'Missing script parameter'}), 400
+            
+            script = input_data['script']
+            args = input_data.get('args', [])
+            cmd_shell = input_data.get('shell', "/bin/bash")
+            timeout = input_data.get('timeout', PROC_TIMEOUT)
+            scriptfile_path = input_data['scriptfile_path']
+            scriptfile_extension = os.path.splitext(scriptfile_path)[1]
+            tmp_scriptfile_path = tempfile.NamedTemporaryFile(suffix=scriptfile_extension).name
+
+            fileout = open(tmp_scriptfile_path, "w")
+            fileout.write(script)
+            fileout.close()
+            
+            # Execute command
+            logger.info(f"Executing script: {remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
+            result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout)
+
+            try: os.remove(tmp_scriptfile_path)
+            except Exception as e: logger.warning(f"Unable to remove temporary file {tmp_scriptfile_path}")
+            
+            # Encrypt response
+            response_json = json.dumps(result)
+            logger.info(f"Execution result of shellscript {scriptfile_path} is {result}")
+            encrypted_response = crypto.encrypt(response_json)
+
+            # save the response for about 10 minutes or till RESPONSE_TTL
+            if request_id:  
+                RESPONSES[request_id] = {"response": encrypted_response}
+                threading.Timer(RESPONSE_TTL, lambda request_id=request_id: RESPONSES.pop(request_id, None)).start()
+            else: return encrypted_response
         
-        # Execute command
-        logger.info(f"Executing script: {request.remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
-        result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout)
-        try: os.remove(tmp_scriptfile_path)
-        except Exception as e: logger.warning(f"Unable to remove temporary file {tmp_scriptfile_path}")
-        
-        # Encrypt response
-        response_json = json.dumps(result)
-        encrypted_response = crypto.encrypt(response_json)
-        
-        return jsonify({'data': encrypted_response})
+        if input_data.get("request_id"):
+            request_id = input_data.get("request_id")
+            # execute the script but don't wait
+            threading.Thread(target=executeShellScript, args=(request_id, request.remote_addr), daemon=True).start()
+            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting"}');
+            RESPONSES[request_id] = {"response": encrypted_response}
+            return jsonify({'data': encrypted_response})
+        else:
+            # run the script to return the result
+            encrypted_response = executeShellScript(None, request.remote_addr)
+            return jsonify({'data': encrypted_response})
         
     except json.JSONDecodeError:
         return jsonify({'error': 'Invalid JSON in decrypted data'}), 400
     except Exception as e:
         logger.error(f"Request processing error: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({'error': 'Pyshell Internal Server Error'}), 500
 
 @app.route('/health', methods=['POST'])
 def health_check():
@@ -255,27 +306,27 @@ def health_check():
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'error': 'Endpoint not found'}), 404
+    return jsonify({'error': f'Endpoint not found {error}'}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
+    return jsonify({'error': f'Internal server error {error}'}), 500
 
 if __name__ == '__main__':
     # Load configuration on startup
     try:
         load_config()
     except Exception as e:
-        print('\nUsage:   pyshell.py [AES Key] [Host to listen on] [Port to listen on]')
+        print('\nUsage:   pyshell.py [AES Key] [Host to listen on] [Port to listen on] [Process Timeout]')
         print('Example: pyshell.py "My_Minimum_30_Character_AES_Key" 0.0.0.0 5050')
         print('\nHelp')
         print('----')
-        print('Configuration file config.json with keys host, port and encryption_key in the same folder')
+        print('Configuration file config.json with keys host, port, encryption_key and proc_timeout in the same folder')
         print('or the environment variable PYSHELL_CONFIG_FILE pointing to its path.')
-        print('\nEnvironment variables PYSHELL_CRYPT_KEY, PYSHELL_HOST and PYSHELL_PORT otherwise.')
+        print('\nEnvironment variables PYSHELL_CRYPT_KEY, PYSHELL_HOST PYSHELL_PORT and PYSHELL_PROC_TIMEOUT otherwise.')
         print('\nOrder of priorities is command line argument > environment variable > configuration file.')
         sys.exit(1)
     
     # Run the Flask app
-    logger.info(f"Starting on {host}:{port} proctimeout {proctimeout} sec")
+    logger.info(f"Starting on {host}:{port} proctimeout {PROC_TIMEOUT} sec")
     serve(app, host=host, port=port, ipv6=True)

@@ -23,20 +23,26 @@ if (require.main === module) {global.LOG = console; global.LOG.info = _=>{};}  /
 const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 
 const DEFAULT_TIMEOUT_HEALTH = 1000, DEFAULT_TIMEOUT = 600000;     // 1 second for health and 10 minutes otherwise
+const CMD_TIMEOUT_INCREMENT = 10000, SCRIPT_TIMEOUT_INCREMENT = 600000;    // 10 seconds for command and 10 minutes for a script
+const MINIMUM_POLL_FREQUENCY = 100; // below this we won't poll
 
 class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async fetchRequest(requestData, endpoint, timeout=DEFAULT_TIMEOUT) {
-        try {
+    async fetchRequest(requestData, endpoint, pollfrequency, timeout=DEFAULT_TIMEOUT) {
+        
+        const _realRequest = async _ => {
+            try {
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
                 undefined, true).toString("base64");
 
             // Send HTTP request
+            const request_id = pollfrequency ? `${Date.now()}${Math.random()*10000}` : undefined;
             const response = await fetch(`${this.apiUrl}/${endpoint}`, {
                 method: "POST",
                 headers: {'content-type': 'application/json; charset=UTF-8'},
                 body: JSON.stringify({data: encryptedRequest}),
+                request_id,
                 timeout
             });
             if (response.status == 408) throw {request: encryptedRequest};
@@ -48,41 +54,61 @@ class ShellCommandClient {
             const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
             const result = JSON.parse(decryptedResponse);
             return result;
-        } catch (error) {
-            if (error.response) {
-                // HTTP error response
-                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data||"")}`);
-            } else if (error.request) {
-                // Network error
-                throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
-            } else {
-                // Other error
-                throw new Error(`Client Error: ${error.message}`);
+            } catch (error) {
+                if (error.response) {
+                    // HTTP error response
+                    throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data||"")}`);
+                } else if (error.request) {
+                    // Network error
+                    throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
+                } else {
+                    // Other error
+                    throw new Error(`Client Error: ${error.message}`);
+                }
             }
         }
+
+        const promiseToWait = new Promise(async (resolve, reject) => {    // calls _realRequest here in polling or await mode
+            if (pollfrequency && pollfrequency > MINIMUM_POLL_FREQUENCY && requestData.request_id) {
+                const interval = setInterval(async _ => {
+                    let result; try {result = await _realRequest();} catch (err) {clearInterval(interval); reject(err); return;}
+                    if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
+                }, pollfrequency);
+            } else {try {resolve(await _realRequest());} catch (err) {reject(err);}}
+        });
+
+        try {
+            const finalResult = await promiseToWait;
+            return finalResult;
+        } catch (err) {throw err;}
     } 
 
-    async executeCommand(cmd, args = [], timeout=DEFAULT_TIMEOUT) {
+    async executeCommand(cmd, args = [], pollfrequency, timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
-        const requestData = {cmd, args: Array.isArray(args) ? args : [args], timeout: timeout+100};
-        return await this.fetchRequest(requestData, "execute", timeout);
+        const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
+        const requestData = {cmd, args: Array.isArray(args) ? args : [args], 
+            timeout: timeout+CMD_TIMEOUT_INCREMENT, request_id};
+        return await this.fetchRequest(requestData, "execute", pollfrequency, timeout);
     }
 
-    async executePyCommand(pycmd, args = {}, timeout=DEFAULT_TIMEOUT) {
+    async executePyCommand(pycmd, args = {}, pollfrequency, timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
-        const requestData = {pycmd, args};
-        return await this.fetchRequest(requestData, "execute", timeout);
+        const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
+        const requestData = {pycmd, args, timeout: timeout+CMD_TIMEOUT_INCREMENT, request_id};
+        return await this.fetchRequest(requestData, "execute", pollfrequency, timeout);
     }
 
-    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", timeout=DEFAULT_TIMEOUT) {
-        // Prepare request data
-        const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell};
-        return await this.fetchRequest(requestData, "shellscript", timeout);
+    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", pollfrequency, timeout=DEFAULT_TIMEOUT) {
+        const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
+        const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell, 
+            timeout: timeout+SCRIPT_TIMEOUT_INCREMENT, request_id};
+        const response = await this.fetchRequest(requestData, "shellscript", pollfrequency, timeout);
+        return response;
     }
 
     async healthCheck(timeout=DEFAULT_TIMEOUT_HEALTH) {
         const requestData = {health: true};
-        return await this.fetchRequest(requestData, "health", timeout);
+        return await this.fetchRequest(requestData, "health", 0, timeout);
     }
 
     async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
@@ -107,6 +133,7 @@ function parseCommandLineArgs() {
         "s": {long: "shellscript", required: false, minlength: 1, help: "Shell script and [args...] if specified"},
         "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout"},
         "t": {long: "health", required: false, help: "Remote server's health"},
+        "r": {long: "poll", required: false, help: "Polling frequency for API calls in milliseconds e.g. 500"},
         "i": {long: "interactive", required: false, help: "Run an interactive session"},
         "__extra_help": "\nExamples\n"+
             `\tnode ${process.argv[1]} --command ls -la\n`+
@@ -157,8 +184,11 @@ async function main() {
         if (commandArgs.shellscript) {
             const script = await fs.promises.readFile(commandArgs.shellscript[0], "utf8");
             const scriptfile_path = `/tmp/${path.basename(commandArgs.shellscript[0])}`;
-            const scriptargs = commandArgs.shellscript[1];
-            const result = await client.executeScript(script, scriptfile_path, scriptargs);
+            const scriptargs = commandArgs.shellscript.slice(1);
+            let pollfrequency; try {if (commandArgs.poll) pollfrequency = parseInt(commandArgs.poll[0]);} catch (err) {console.error(`Bad polling frequency ${commandArgs.poll[0]}`); return;}
+            
+            console.log(`Executing: ${commandArgs.shellscript.join(' ')}`);
+            const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency);
             displayResult(result);
             return;
         }
@@ -178,6 +208,7 @@ async function main() {
         // Execute Python command
         if (commandArgs.pycommand) {
             const cmd = commandArgs.pycommand[0];
+            let pollfrequency; try {if (commandArgs.poll) pollfrequency = parseInt(commandArgs.poll[0]);} catch (err) {console.error(`Bad polling frequency ${commandArgs.poll[0]}`); return;}
             const cmdArgs = {};
             try {
                 if (commandArgs.pycommand[1]) for (const cmdArgTuple of commandArgs.pycommand[1].split(",")) 
@@ -188,7 +219,7 @@ async function main() {
             }
 
             console.log(`Executing: ${commandArgs.pycommand.join(' ')}`);
-            const result = await client.executePyCommand(cmd, cmdArgs);
+            const result = await client.executePyCommand(cmd, cmdArgs, pollfrequency);
             displayResult(result); 
             return;
         }
@@ -196,10 +227,11 @@ async function main() {
         // Execute OS command
         if (commandArgs.command) {
             const cmd = commandArgs.command[0];
+            let pollfrequency; try {if (commandArgs.poll) pollfrequency = parseInt(commandArgs.poll[0]);} catch (err) {console.error(`Bad polling frequency ${commandArgs.poll[0]}`); return;}
             const cmdArgs = commandArgs.command.slice(1);
 
             console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
-            const result = await client.executeCommand(cmd, cmdArgs);
+            const result = await client.executeCommand(cmd, cmdArgs, pollfrequency);
             displayResult(result); 
             return;
         }

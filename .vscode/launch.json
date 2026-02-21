@@ -43,6 +43,78 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Launch JS Client Polling Mode - ls command",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "5050",
+                "-k",
+                "MyMinimum30CharacterAESKey1234",
+                "-r",
+                "500",
+                "-m",
+                "ls",
+                "-al"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client - script",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "5050",
+                "-k",
+                "MyMinimum30CharacterAESKey1234",
+                "-s",
+                "${workspaceFolder}/test.sh",
+                "ls",
+                "/Users/"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client Polling Mode - script",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "5050",
+                "-k",
+                "MyMinimum30CharacterAESKey1234",
+                "-r",
+                "500",
+                "-s",
+                "${workspaceFolder}/test.sh",
+                "ls",
+                "/Users/"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch JS Client - health command",
             "skipFiles": [
                 "<node_internals>/**"
