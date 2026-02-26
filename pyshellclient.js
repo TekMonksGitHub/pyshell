@@ -30,19 +30,17 @@ class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
     async fetchRequest(requestData, endpoint, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
-        
+
         const _realRequest = async _ => {
             try {
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
                 undefined, true).toString("base64");
 
             // Send HTTP request
-            const request_id = pollfrequency ? `${Date.now()}${Math.random()*10000}` : undefined;
             const response = await fetch(`${this.apiUrl}/${endpoint}`, {
                 method: "POST",
                 headers: {'content-type': 'application/json; charset=UTF-8'},
-                body: JSON.stringify({data: encryptedRequest}),
-                request_id,
+                body: JSON.stringify({data: encryptedRequest}), 
                 timeout
             });
             if (response.status == 408) throw {request: encryptedRequest};
@@ -75,12 +73,12 @@ class ShellCommandClient {
                     let result; try {result = await _realRequest();} catch (err) {
                         clearInterval(interval); if (streamcollector) streamcollector.stderr(err); reject(err); return; }
                     if (streamcollector && (result._pyshell_status == "waiting")) {
-                        if (result.stdout.trim()) {
+                        if (result.stdout?.length) {
                             const stdout_lines = result.stdout.split("\n");
                             streamcollector.stdout(stdout_lines.slice(stdout_last_sent, stdout_lines.length).join("\n")); 
                             stdout_last_sent = stdout_lines.length;
                         }
-                        if (result.stderr.trim()) {
+                        if (result.stderr?.length) {
                             const stderr_lines = result.stderr.split("\n");
                             streamcollector.stderr(stderr_lines.slice(stderr_last_sent, stderr_lines.length).join("\n")); 
                             stderr_last_sent = stderr_lines.length;
