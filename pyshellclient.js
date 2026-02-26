@@ -70,10 +70,22 @@ class ShellCommandClient {
 
         const promiseToWait = new Promise(async (resolve, reject) => {    // calls _realRequest here in polling or await mode
             if (pollfrequency && pollfrequency > MINIMUM_POLL_FREQUENCY && requestData.request_id) {
+                let stdout_last_sent = 0, stderr_last_sent = 0;
                 const interval = setInterval(async _ => {
                     let result; try {result = await _realRequest();} catch (err) {
                         clearInterval(interval); if (streamcollector) streamcollector.stderr(err); reject(err); return; }
-                    if (streamcollector) {streamcollector.stdout(result.stdout); streamcollector.stderr(result.stderr);}
+                    if (streamcollector && (result._pyshell_status == "waiting")) {
+                        if (result.stdout.trim()) {
+                            const stdout_lines = result.stdout.split("\n");
+                            streamcollector.stdout(stdout_lines.slice(stdout_last_sent, stdout_lines.length).join("\n")); 
+                            stdout_last_sent = stdout_lines.length;
+                        }
+                        if (result.stderr.trim()) {
+                            const stderr_lines = result.stderr.split("\n");
+                            streamcollector.stderr(stderr_lines.slice(stderr_last_sent, stderr_lines.length).join("\n")); 
+                            stderr_last_sent = stderr_lines.length;
+                        }
+                    }
                     if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
                 }, pollfrequency);
             } else {try {resolve(await _realRequest());} catch (err) {reject(err);}}
