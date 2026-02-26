@@ -29,7 +29,7 @@ const MINIMUM_POLL_FREQUENCY = 100; // below this we won't poll
 class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async fetchRequest(requestData, endpoint, pollfrequency, timeout=DEFAULT_TIMEOUT) {
+    async fetchRequest(requestData, endpoint, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
         
         const _realRequest = async _ => {
             try {
@@ -71,7 +71,9 @@ class ShellCommandClient {
         const promiseToWait = new Promise(async (resolve, reject) => {    // calls _realRequest here in polling or await mode
             if (pollfrequency && pollfrequency > MINIMUM_POLL_FREQUENCY && requestData.request_id) {
                 const interval = setInterval(async _ => {
-                    let result; try {result = await _realRequest();} catch (err) {clearInterval(interval); reject(err); return;}
+                    let result; try {result = await _realRequest();} catch (err) {
+                        clearInterval(interval); if (streamcollector) streamcollector.stderr(err); reject(err); return; }
+                    if (streamcollector) {streamcollector.stdout(result.stdout); streamcollector.stderr(result.stderr);}
                     if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
                 }, pollfrequency);
             } else {try {resolve(await _realRequest());} catch (err) {reject(err);}}
@@ -83,26 +85,26 @@ class ShellCommandClient {
         } catch (err) {throw err;}
     } 
 
-    async executeCommand(cmd, args = [], pollfrequency, timeout=DEFAULT_TIMEOUT) {
+    async executeCommand(cmd, args = [], pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
         const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
         const requestData = {cmd, args: Array.isArray(args) ? args : [args], 
             timeout: timeout+CMD_TIMEOUT_INCREMENT, request_id};
-        return await this.fetchRequest(requestData, "execute", pollfrequency, timeout);
+        return await this.fetchRequest(requestData, "execute", pollfrequency, streamcollector, timeout);
     }
 
-    async executePyCommand(pycmd, args = {}, pollfrequency, timeout=DEFAULT_TIMEOUT) {
+    async executePyCommand(pycmd, args = {}, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
         // Prepare request data
         const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
         const requestData = {pycmd, args, timeout: timeout+CMD_TIMEOUT_INCREMENT, request_id};
-        return await this.fetchRequest(requestData, "execute", pollfrequency, timeout);
+        return await this.fetchRequest(requestData, "execute", pollfrequency, streamcollector, timeout);
     }
 
-    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", pollfrequency, timeout=DEFAULT_TIMEOUT) {
+    async executeScript(script, scriptfile_path, args = [], shell="/bin/bash", pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
         const request_id = pollfrequency > MINIMUM_POLL_FREQUENCY ? `${Date.now()}.${Math.random()*1000}` : undefined;
         const requestData = {script, scriptfile_path, args: Array.isArray(args) ? args : [args], shell, 
             timeout: timeout+SCRIPT_TIMEOUT_INCREMENT, request_id};
-        const response = await this.fetchRequest(requestData, "shellscript", pollfrequency, timeout);
+        const response = await this.fetchRequest(requestData, "shellscript", pollfrequency, streamcollector, timeout);
         return response;
     }
 
@@ -188,7 +190,8 @@ async function main() {
             let pollfrequency; try {if (commandArgs.poll) pollfrequency = parseInt(commandArgs.poll[0]);} catch (err) {console.error(`Bad polling frequency ${commandArgs.poll[0]}`); return;}
             
             console.log(`Executing: ${commandArgs.shellscript.join(' ')}`);
-            const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency);
+            const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency,
+                {stdout: out => console.log(`Stdout from wait: ${out}\n`), stderr: err => console.log(`Stderr from wait: ${err}\n`)});
             displayResult(result);
             return;
         }
@@ -231,7 +234,8 @@ async function main() {
             const cmdArgs = commandArgs.command.slice(1);
 
             console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
-            const result = await client.executeCommand(cmd, cmdArgs, pollfrequency);
+            const result = await client.executeCommand(cmd, cmdArgs, pollfrequency, 
+                {stdout: out => console.log(`Stdout from wait: ${out}\n`), stderr: err => console.log(`Stderr from wait: ${err}\n`)});
             displayResult(result); 
             return;
         }

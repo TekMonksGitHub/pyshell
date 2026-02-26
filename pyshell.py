@@ -134,35 +134,59 @@ def decrypt_incoming(request):
     input_data = json.loads(decrypted_input)
     return input_data
 
-def execute_command(cmd, args, timeout=PROC_TIMEOUT):
-    """Execute shell command safely and return result"""
-    try:
-        # Combine command and arguments
-        full_command = [cmd] + args if isinstance(args, list) else [cmd, args]
-        
-        # Execute command with timeout and security measures, don't check i.e. raise exception on non-zero exit
-        result = subprocess.run(full_command, capture_output=True, text=True, timeout=timeout, check=False)
-        return { 'exit_code': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr }
-        
-    except subprocess.TimeoutExpired:
-        return { 'exit_code': -1,'stdout': '', 'stderr': f'Command timed out after ${timeout} seconds' }
-    except Exception as e:
-        return { 'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}' }
+def execute_command(cmd, args, timeout=PROC_TIMEOUT, request_id=None):
+    """Execute shell command safely, streaming stdout/stderr as they arrive"""
+    process = None
+    stdout_thread = None
+    stderr_thread = None
+    stdout_lines = []
+    stderr_lines = []
 
+    try:
+        full_command = [cmd] + args if isinstance(args, list) else [cmd, args]
+        process = subprocess.Popen(full_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+
+        def capture_stream(stream, line_buffer):
+            for line in stream:
+                line_buffer.append(line.rstrip("\n"))
+                if request_id:
+                    partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout_lines), "stderr": "\n".join(stderr_lines)}
+                    RESPONSES[request_id] = {"response": crypto.encrypt(json.dumps(partial))}
+
+        stdout_thread = threading.Thread(target=capture_stream, args=(process.stdout, stdout_lines))
+        stderr_thread = threading.Thread(target=capture_stream, args=(process.stderr, stderr_lines))
+        stdout_thread.start()
+        stderr_thread.start()
+
+        try:
+            process.wait(timeout=timeout)
+            return {'exit_code': process.returncode, 'stdout': "\n".join(stdout_lines), 'stderr': "\n".join(stderr_lines)}
+        except subprocess.TimeoutExpired:
+            return {'exit_code': -1, 'stdout': "\n".join(stdout_lines), 'stderr': f'Command timed out after {timeout} seconds'}
+
+    except Exception as e:
+        return {'exit_code': -1, 'stdout': "\n".join(stdout_lines), 'stderr': f'Execution error: {str(e)}'}
+
+    finally:
+        if process: process.kill()
+        if stdout_thread: stdout_thread.join()
+        if stderr_thread: stderr_thread.join()
+        
 def execute_pycommand(cmd, args, timeout=PROC_TIMEOUT):
     def run():
         redirected_output = sys.stdout = StringIO()
-        exec(cmd, args, {})
-        sys.stdout = sys.__stdout__
-        return {'exit_code': 0, 'stdout': redirected_output.getvalue(), 'stderr': ''}
+        try:
+            exec(cmd, args, {})
+            return {'exit_code': 0, 'stdout': redirected_output.getvalue(), 'stderr': ''}
+        except Exception as e:
+            return {'exit_code': -1, 'stdout': redirected_output.getvalue(), 'stderr': f'Execution error: {str(e)}'}
+        finally:
+            sys.stdout = sys.__stdout__
 
     try:
-        with futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(run).result(timeout=timeout)
+        with futures.ThreadPoolExecutor(max_workers=1) as executor: return executor.submit(run).result(timeout=timeout)
     except futures.TimeoutError:
         return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution timed out after {timeout}s'}
-    except Exception as e:
-        return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution error: {str(e)}'}
 
 @app.route('/execute', methods=['POST'])
 def execute_endpoint():
@@ -190,7 +214,8 @@ def execute_endpoint():
 
             # Execute command
             logger.info(f"Executing: {remote_addr} -> {cmd} {args}")
-            result = execute_command(cmd, args, timeout) if cmd_type == 'oscmd' else execute_pycommand(cmd, args, timeout)
+            if cmd_type == 'oscmd': result = execute_command(cmd, args, timeout, request_id)  
+            else: result = execute_pycommand(cmd, args, timeout)
             
             # Encrypt and store response
             response_json = json.dumps(result)
@@ -207,7 +232,7 @@ def execute_endpoint():
             request_id = input_data.get("request_id")
             # execute the command but don't wait
             threading.Thread(target=executeCmd, args=(request_id, request.remote_addr), daemon=True).start()  # run as a seperate thread
-            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting"}');
+            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}');
             RESPONSES[request_id] = {"response": encrypted_response}
             return jsonify({'data': encrypted_response})
         else:
@@ -256,7 +281,7 @@ def shellscript_endpoint():
             
             # Execute command
             logger.info(f"Executing script: {remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
-            result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout)
+            result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout, request_id)
 
             try: os.remove(tmp_scriptfile_path)
             except Exception as e: logger.warning(f"Unable to remove temporary file {tmp_scriptfile_path}")
@@ -276,7 +301,7 @@ def shellscript_endpoint():
             request_id = input_data.get("request_id")
             # execute the script but don't wait
             threading.Thread(target=executeShellScript, args=(request_id, request.remote_addr), daemon=True).start()
-            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting"}');
+            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}');
             RESPONSES[request_id] = {"response": encrypted_response}
             return jsonify({'data': encrypted_response})
         else:

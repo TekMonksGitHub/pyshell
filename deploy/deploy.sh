@@ -8,9 +8,9 @@
 # 5 - Directory PYSHELL_PATH to deploy the shell files to
 # 6 - Pyshell's user
 # 7 - Pyshell's AES key
-# 8 - Pyshell's AES host
-# 9 - Pyshell's AES port
-# 10 - Pyshell's AES default process timeout (default: 1800)
+# 8 - Pyshell's host
+# 9 - Pyshell's port
+# 10 - Pyshell's default process timeout (default: 1800 seconds or 30 minutes)
 #
 # Eg ./deploy.sh 91.232.105.77 64760 root \
 #       fjeoifeio90r8ropfp304fe2r9flko23fk03dqef /kloudust/system \
@@ -36,19 +36,19 @@ function exitFailed() {
 }
 
 
-if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no "$ID@$HOST" -p $SSHPORT "bash -c \"mkdir -p \\\"$PYSHELL_PATH\\\"\""; then 
+if ! sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" "$ID@$HOST" -p $SSHPORT "bash -c \"mkdir -p \\\"$PYSHELL_PATH\\\"\""; then 
     exitFailed "Remote directory creation failed"
 fi
 
-if ! cat "$PYSHELLDIR/pyshell.py" | sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no $ID@$HOST -p $SSHPORT "cat > '$PYSHELL_PATH/pyshell.py'"; then
+if ! cat "$PYSHELLDIR/pyshell.py" | sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" $ID@$HOST -p $SSHPORT "cat > '$PYSHELL_PATH/pyshell.py'"; then
     exitFailed "Script upload failed"
 fi
 
-if ! cat "$SCRIPT_DIR/pyshell.service.template" | sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no $ID@$HOST -p $SSHPORT "cat > '$PYSHELL_PATH/pyshell.service.template'"; then
+if ! cat "$SCRIPT_DIR/pyshell.service.template" | sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" $ID@$HOST -p $SSHPORT "cat > '$PYSHELL_PATH/pyshell.service.template'"; then
     exitFailed "Service file upload failed"
 fi
 
-if ! sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no $ID@$HOST -p $SSHPORT 'bash -s' < "$SCRIPT_DIR/remotedeploy.sh" "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT; then
+if ! sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" $ID@$HOST -p $SSHPORT 'bash -s' < "$SCRIPT_DIR/remotedeploy.sh" "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT; then
     exitFailed "Script remote deployment failed"
 fi
 
