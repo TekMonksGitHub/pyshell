@@ -75,13 +75,17 @@ class ShellCommandClient {
                     if (streamcollector && (result._pyshell_status == "waiting")) {
                         if (result.stdout?.length) {
                             const stdout_lines = result.stdout.split("\n");
-                            streamcollector.stdout(stdout_lines.slice(stdout_last_sent, stdout_lines.length).join("\n")); 
-                            stdout_last_sent = stdout_lines.length;
+                            if (stdout_lines.length > stdout_last_sent) {
+                                streamcollector.stdout(stdout_lines.slice(stdout_last_sent, stdout_lines.length).join("\n")); 
+                                stdout_last_sent = stdout_lines.length;
+                            }
                         }
                         if (result.stderr?.length) {
                             const stderr_lines = result.stderr.split("\n");
-                            streamcollector.stderr(stderr_lines.slice(stderr_last_sent, stderr_lines.length).join("\n")); 
-                            stderr_last_sent = stderr_lines.length;
+                            if (stderr_lines.length > stderr_last_sent) {
+                                streamcollector.stderr(stderr_lines.slice(stderr_last_sent, stderr_lines.length).join("\n")); 
+                                stderr_last_sent = stderr_lines.length;
+                            }
                         }
                     }
                     if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
@@ -201,7 +205,7 @@ async function main() {
             
             console.log(`Executing: ${commandArgs.shellscript.join(' ')}`);
             const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency,
-                {stdout: out => console.log(`Stdout from wait: ${out}\n`), stderr: err => console.log(`Stderr from wait: ${err}\n`)});
+                {stdout: out => console.log(`Stdout from wait: \n${out}\n`), stderr: err => console.log(`Stderr from wait: \n${err}\n`)});
             displayResult(result);
             return;
         }
