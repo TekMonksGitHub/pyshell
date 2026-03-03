@@ -25,11 +25,13 @@ const {fetch} = require(`${MONKSHULIBDIR}/httpClient.js`);
 const DEFAULT_TIMEOUT_HEALTH = 1000, DEFAULT_TIMEOUT = 600000;     // 1 second for health and 10 minutes otherwise
 const CMD_TIMEOUT_INCREMENT = 10000, SCRIPT_TIMEOUT_INCREMENT = 600000;    // 10 seconds for command and 10 minutes for a script
 const MINIMUM_POLL_FREQUENCY = 100; // below this we won't poll
+const MAX_IGNORE_POLL_FAILURES = 3;
 
 class ShellCommandClient {
     constructor(apiUrl = 'http://localhost:5000', aesKey) {this.apiUrl = apiUrl; this.aesKey = aesKey;}
 
-    async fetchRequest(requestData, endpoint, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT) {
+    async fetchRequest(requestData, endpoint, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT, 
+            pollfailurelimit=MAX_IGNORE_POLL_FAILURES) {
 
         const _realRequest = async _ => {
             try {
@@ -68,25 +70,14 @@ class ShellCommandClient {
 
         const promiseToWait = new Promise(async (resolve, reject) => {    // calls _realRequest here in polling or await mode
             if (pollfrequency && pollfrequency > MINIMUM_POLL_FREQUENCY && requestData.request_id) {
-                let stdout_last_sent = 0, stderr_last_sent = 0;
+                let pollfailures = 0;
                 const interval = setInterval(async _ => {
-                    let result; try {result = await _realRequest();} catch (err) {
+                    let result; try {result = await _realRequest(); pollfailures = 0;} catch (err) {
+                        if (++pollfailures <= pollfailurelimit) return;
                         clearInterval(interval); if (streamcollector) streamcollector.stderr(err); reject(err); return; }
                     if (streamcollector && (result._pyshell_status == "waiting")) {
-                        if (result.stdout?.length) {
-                            const stdout_lines = result.stdout.split("\n");
-                            if (stdout_lines.length > stdout_last_sent) {
-                                streamcollector.stdout(stdout_lines.slice(stdout_last_sent, stdout_lines.length).join("\n")); 
-                                stdout_last_sent = stdout_lines.length;
-                            }
-                        }
-                        if (result.stderr?.length) {
-                            const stderr_lines = result.stderr.split("\n");
-                            if (stderr_lines.length > stderr_last_sent) {
-                                streamcollector.stderr(stderr_lines.slice(stderr_last_sent, stderr_lines.length).join("\n")); 
-                                stderr_last_sent = stderr_lines.length;
-                            }
-                        }
+                        if (result.stdout.length) streamcollector.stdout(result.stdout||""); 
+                        if (result.stderr.length) streamcollector.stderr(result.stderr||""); 
                     }
                     if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
                 }, pollfrequency);
@@ -205,7 +196,7 @@ async function main() {
             
             console.log(`Executing: ${commandArgs.shellscript.join(' ')}`);
             const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency,
-                {stdout: out => console.log(`Stdout from wait: \n${out}\n`), stderr: err => console.log(`Stderr from wait: \n${err}\n`)});
+                {stdout: out => {if (out.trim().length) console.log(out.trim())}, stderr: err => {if (err.trim().length) console.error(err.trim())}});
             displayResult(result);
             return;
         }
@@ -249,7 +240,7 @@ async function main() {
 
             console.log(`Executing: ${cmd} ${cmdArgs.join(' ')}`);
             const result = await client.executeCommand(cmd, cmdArgs, pollfrequency, 
-                {stdout: out => console.log(`Stdout from wait: ${out}\n`), stderr: err => console.log(`Stderr from wait: ${err}\n`)});
+                {stdout: out => {if (out.trim().length) console.log(out.trim())}, stderr: err => {if (err.trim().length) console.error(err.trim())}});
             displayResult(result); 
             return;
         }

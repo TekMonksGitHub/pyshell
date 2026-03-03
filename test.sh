@@ -8,6 +8,11 @@ printf "$OS\n"
 
 sleep 2     # this should trigger a wait response
 
+echo OS details follow again
+printf "$OS\n"
+
+sleep 2     # this should trigger a wait response
+
 if [ -n "$CUSTOM_CMD" ]; then
     printf "\nCustom command output follows\n"
     bash -c $CUSTOM_CMD

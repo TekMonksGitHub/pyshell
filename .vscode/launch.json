@@ -21,6 +21,35 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Deploy PyShell on a host",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "109.236.83.38",
+                "-p",
+                "24",
+                "-d",
+                "109.236.83.38",
+                "64218",
+                "root",
+                "DLT4TekMonks",
+                "/root/pyshell",
+                "root",
+                "root671a0289ac7646814cfc8fa9991d679f2278d9142bc0722706608054e613f571",
+                "0.0.0.0",
+                "24",
+                "1800"
+            ]
+        },
+
+
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch JS Client - ls command",
             "skipFiles": [
                 "<node_internals>/**"
@@ -109,6 +138,29 @@
                 "${workspaceFolder}/test.sh",
                 "ls",
                 "/Users/"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client Polling Mode - host script",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "109.236.83.38",
+                "-p",
+                "24",
+                "-k",
+                "root671a0289ac7646814cfc8fa9991d679f2278d9142bc0722706608054e613f571",
+                "-r",
+                "500",
+                "-s",
+                "${workspaceFolder}/test_host.sh"
             ]
         },
 

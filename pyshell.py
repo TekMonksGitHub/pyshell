@@ -94,6 +94,7 @@ port = '5050'
 PROC_TIMEOUT = 1800  # 30 minutes default timeout
 RESPONSE_TTL = 600  # 10 minutes autodelete response entries
 RESPONSES = {}
+RESPONSES_LOCK = threading.Lock()
 
 def load_config():
     """Load encryption key from config file"""
@@ -142,16 +143,21 @@ def execute_command(cmd, args, timeout=PROC_TIMEOUT, request_id=None):
     stdout_lines = []
     stderr_lines = []
 
+    def cleanup():
+            if process: process.kill()
+            if stdout_thread: stdout_thread.join()
+            if stderr_thread: stderr_thread.join()
+
+    def capture_stream(stream, line_buffer):
+        for line in stream:
+            line_buffer.append(line.rstrip("\n"))
+            if request_id:
+                partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout_lines), "stderr": "\n".join(stderr_lines)}
+                RESPONSES[request_id]["response"] = crypto.encrypt(json.dumps(partial))
+
     try:
         full_command = [cmd] + args if isinstance(args, list) else [cmd, args]
         process = subprocess.Popen(full_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-
-        def capture_stream(stream, line_buffer):
-            for line in stream:
-                line_buffer.append(line.rstrip("\n"))
-                if request_id:
-                    partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout_lines), "stderr": "\n".join(stderr_lines)}
-                    RESPONSES[request_id] = {"response": crypto.encrypt(json.dumps(partial))}
 
         stdout_thread = threading.Thread(target=capture_stream, args=(process.stdout, stdout_lines))
         stderr_thread = threading.Thread(target=capture_stream, args=(process.stderr, stderr_lines))
@@ -160,17 +166,14 @@ def execute_command(cmd, args, timeout=PROC_TIMEOUT, request_id=None):
 
         try:
             process.wait(timeout=timeout)
+            cleanup()
             return {'exit_code': process.returncode, 'stdout': "\n".join(stdout_lines), 'stderr': "\n".join(stderr_lines)}
         except subprocess.TimeoutExpired:
+            cleanup()
             return {'exit_code': -1, 'stdout': "\n".join(stdout_lines), 'stderr': f'Command timed out after {timeout} seconds'}
-
     except Exception as e:
+        cleanup()
         return {'exit_code': -1, 'stdout': "\n".join(stdout_lines), 'stderr': f'Execution error: {str(e)}'}
-
-    finally:
-        if process: process.kill()
-        if stdout_thread: stdout_thread.join()
-        if stderr_thread: stderr_thread.join()
         
 def execute_pycommand(cmd, args, timeout=PROC_TIMEOUT):
     def run():
@@ -188,25 +191,40 @@ def execute_pycommand(cmd, args, timeout=PROC_TIMEOUT):
     except futures.TimeoutError:
         return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution timed out after {timeout}s'}
 
+def get_cached_or_partial_response(request_id): 
+    with RESPONSES_LOCK:
+        encrypted_response = RESPONSES[request_id]["response"]
+        decrypted_response = json.loads(crypto.decrypt(encrypted_response)) 
+
+        if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
+        else:
+            stdout_counter = RESPONSES[request_id].get("stdout_counter", 0)
+            stderr_counter = RESPONSES[request_id].get("stderr_counter", 0)
+            stdout = decrypted_response["stdout"].splitlines()[stdout_counter:]
+            stderr = decrypted_response["stderr"].splitlines()[stderr_counter:]
+            RESPONSES[request_id]["stdout_counter"] = len(decrypted_response["stdout"].splitlines())
+            RESPONSES[request_id]["stderr_counter"] = len(decrypted_response["stderr"].splitlines())
+            partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout), "stderr": "\n".join(stderr)}
+            encrypted_response = crypto.encrypt(json.dumps(partial))
+
+        return encrypted_response
+
 @app.route('/execute', methods=['POST'])
 def execute_endpoint():
     """Main API endpoint for encrypted command execution"""
     try:
         input_data = decrypt_incoming(request)
 
+        # Validate input format
+        if 'cmd' not in input_data and 'pycmd' not in input_data:
+            return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
+
         # if we already have a cached response send it, no need to do anything else as the task is already running
         if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
             request_id = input_data.get("request_id")
-            encrypted_response = RESPONSES[request_id]["response"]
-            decrypted_response = json.loads(crypto.decrypt(encrypted_response)) 
-            if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
-            return jsonify({'data': encrypted_response})
+            return jsonify({'data': get_cached_or_partial_response(request_id)})
         
         def executeCmd(request_id, remote_addr):
-            # Validate input format
-            if 'cmd' not in input_data and 'pycmd' not in input_data:
-                return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
-            
             cmd_type = 'oscmd' if 'cmd' in input_data else 'pycmd'
             cmd = input_data.get('cmd') or input_data.get('pycmd')
             args = input_data.get('args', [] if cmd_type == 'oscmd' else {})
@@ -252,21 +270,16 @@ def shellscript_endpoint():
     try:
         input_data = decrypt_incoming(request)
 
+        # Validate input format
+        if 'script' not in input_data or 'scriptfile_path' not in input_data:
+            return jsonify({'error': 'Missing script or scriptfile_path parameter'}), 400
+
         # if we already have a cached response send it, no need to do anything else as the task is already running
         if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
             request_id = input_data.get("request_id")
-            encrypted_response = RESPONSES[request_id]["response"]
-            decrypted_response = json.loads(crypto.decrypt(encrypted_response))
-            if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
-            return jsonify({'data': encrypted_response})
+            return jsonify({'data': get_cached_or_partial_response(request_id)})
 
         def executeShellScript(request_id, remote_addr):
-            # Validate input format
-            if 'script' not in input_data:
-                return jsonify({'error': 'Missing script parameter'}), 400
-            if 'scriptfile_path' not in input_data:
-                return jsonify({'error': 'Missing script parameter'}), 400
-            
             script = input_data['script']
             args = input_data.get('args', [])
             cmd_shell = input_data.get('shell', "/bin/bash")
