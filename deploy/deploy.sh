@@ -11,10 +11,11 @@
 # 8 - Pyshell's host
 # 9 - Pyshell's port
 # 10 - Pyshell's default process timeout (default: 1800 seconds or 30 minutes)
+# 11 - Whether to open an NFT port, default false, otherwise can be true or firewall table name
 #
 # Eg ./deploy.sh 91.232.105.77 64760 root \
 #       fjeoifeio90r8ropfp304fe2r9flko23fk03dqef /kloudust/system \
-#       48984jfkj90824edoj098398ioqjd902u821 0.0.0.0 64761 root 1800
+#       48984jfkj90824edoj098398ioqjd902u821 0.0.0.0 64761 root 1800 true
 
 SCRIPT_DIR=$(dirname "$0")
 PYSHELLDIR=$(realpath "$SCRIPT_DIR/../")
@@ -28,6 +29,7 @@ PYSHELL_HOST=$7
 PYSHELL_PORT=$8
 PYSHELL_ID=$9
 PYSHELL_TIMEOUT="${10:-1800}"
+PYSHELL_FIREWALL="${11:-false}"
 
 
 function exitFailed() {
@@ -48,7 +50,7 @@ if ! cat "$SCRIPT_DIR/pyshell.service.template" | sshpass -p "$PASS" ssh -o "Str
     exitFailed "Service file upload failed"
 fi
 
-if ! sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" $ID@$HOST -p $SSHPORT 'bash -s' < "$SCRIPT_DIR/remotedeploy.sh" "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT; then
+if ! sshpass -p "$PASS" ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" $ID@$HOST -p $SSHPORT 'bash -s' < "$SCRIPT_DIR/remotedeploy.sh" "$PYSHELL_PATH" $PYSHELL_ID $PYSHELL_KEY $PYSHELL_HOST $PYSHELL_PORT $PYSHELL_TIMEOUT $PYSHELL_FIREWALL; then
     exitFailed "Script remote deployment failed"
 fi
 

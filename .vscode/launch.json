@@ -21,7 +21,7 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Deploy PyShell on a host",
+            "name": "Deploy PyShell on a host, open firewall (NFT)",
             "skipFiles": [
                 "<node_internals>/**"
             ],
@@ -34,15 +34,16 @@
                 "24",
                 "-d",
                 "109.236.83.38",
-                "64218",
+                "62195",
                 "root",
-                "DLT4TekMonks",
+                "36f0a37fe15fa8f2deb962504c0c34b91bdb48accd68e117731ea7f62ee7c29d",
                 "/root/pyshell",
                 "root",
                 "root671a0289ac7646814cfc8fa9991d679f2278d9142bc0722706608054e613f571",
                 "0.0.0.0",
                 "24",
-                "1800"
+                "1800",
+                "kdhostfirewall"
             ]
         },
 

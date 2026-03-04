@@ -74,10 +74,10 @@ class ShellCommandClient {
                 const interval = setInterval(async _ => {
                     let result; try {result = await _realRequest(); pollfailures = 0;} catch (err) {
                         if (++pollfailures <= pollfailurelimit) return;
-                        clearInterval(interval); if (streamcollector) streamcollector.stderr(err); reject(err); return; }
+                        clearInterval(interval); if (streamcollector) streamcollector.stderr(err.toString()); reject(err); return; }
                     if (streamcollector && (result._pyshell_status == "waiting")) {
-                        if (result.stdout.length) streamcollector.stdout(result.stdout||""); 
-                        if (result.stderr.length) streamcollector.stderr(result.stderr||""); 
+                        if (result.stdout?.length) streamcollector.stdout(result.stdout||""); 
+                        if (result.stderr?.length) streamcollector.stderr(result.stderr||""); 
                     }
                     if (result._pyshell_status != "waiting") {clearInterval(interval); resolve(result); return;}
                 }, pollfrequency);
@@ -119,9 +119,10 @@ class ShellCommandClient {
     }
 
     async deploy(host, port, id, password, pyshell_path, pyshell_user, pyshell_aeskey, 
-            pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout) {
+            pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout, pyshell_firewall="false") {
         const args = [`'${__dirname}/deploy/deploy.sh'`, host, port, id, `'${password}'`, `'${pyshell_path}'`,
-            pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_user, pyshell_process_default_timeout];
+            pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_user, 
+            pyshell_process_default_timeout, pyshell_firewall];
         const cmd = args.join(' ');
         try {const {stdout, stderr} = await execasync(cmd); return {stdout, stderr, exit_code: 0};} 
         catch (error) {return {stdout: undefined, stderr: error.message, exit_code: error.status};}
@@ -138,7 +139,7 @@ function parseCommandLineArgs() {
         "m": {long: "command", required: false, minlength: 1, help: "Shell command and [args...] if specified"}, 
         "y": {long: "pycommand", required: false, minlength: 1, help: "Python code and [args...] if specified"}, 
         "s": {long: "shellscript", required: false, minlength: 1, help: "Shell script and [args...] if specified"},
-        "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout"},
+        "d": {long: "deploy", required: false, minlength: 9, help: "Deployment arguments ssh_host ssh_port ssh_id ssh_password pyshell_path pyshell_user pyshell_aeskey pyshell_host pyshell_port pyshell_timeout firewall_name"},
         "t": {long: "health", required: false, help: "Remote server's health"},
         "r": {long: "poll", required: false, help: "Polling frequency for API calls in milliseconds e.g. 500"},
         "i": {long: "interactive", required: false, help: "Run an interactive session"},
@@ -196,7 +197,7 @@ async function main() {
             
             console.log(`Executing: ${commandArgs.shellscript.join(' ')}`);
             const result = await client.executeScript(script, scriptfile_path, scriptargs, undefined, pollfrequency,
-                {stdout: out => {if (out.trim().length) console.log(out.trim())}, stderr: err => {if (err.trim().length) console.error(err.trim())}});
+                {stdout: out => {if (out?.trim().length) console.log(out.trim())}, stderr: err => {if (err?.trim().length) console.error(err.trim())}});
             displayResult(result);
             return;
         }
@@ -207,8 +208,10 @@ async function main() {
             const pyshell_user = dpArgs[5], pyshell_aeskey = dpArgs[6];
             const pyshell_listening_host = dpArgs[7], pyshell_listening_port = dpArgs[8];
             const pyshell_process_default_timeout = dpArgs[9] || 1800;
+            const pyshell_firewall = dpArgs[10] || "false";
             const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
-                pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
+                pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, 
+                pyshell_process_default_timeout, pyshell_firewall);
             displayResult(result);
             return;
         }
@@ -321,8 +324,10 @@ async function interactiveMode(client) {
                     const pyshell_user = parts[6], pyshell_aeskey = parts[7];
                     const pyshell_listening_host = parts[8], pyshell_listening_port = parts[9];
                     const pyshell_process_default_timeout = parts[10] || 1800;
+                    const pyshell_firewall = parts[11] || "false";
                     const result = await client.deploy(host, port, id, password, pyshell_path, pyshell_user,
-                        pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, pyshell_process_default_timeout);
+                        pyshell_aeskey, pyshell_listening_host, pyshell_listening_port, 
+                        pyshell_process_default_timeout, pyshell_firewall);
                     // Display results
                     displayResult(result, true);
                     setImmediate(_=>askCommand());

@@ -3,6 +3,11 @@
 # Params
 # 1 - Path which holds the scripts 
 # 2 - ID to use to run the service, defaults to the logged in user's ID
+# 3 - The AES key
+# 4 - The host to listen on eg 0.0.0.0
+# 5 - The port to listen on
+# 6 - The process timeout configuration for PyShell
+# 7 - Whether to open an NFT firewall port for PyShell
 
 PYSHELL_PATH="$1"
 PYSHELL_ID="${2:-`whoami`}"
@@ -10,6 +15,7 @@ PYSHELL_KEY=$3
 PYSHELL_HOST=$4
 PYSHELL_PORT=$5
 PYSHELL_TIMEOUT="${6:-1800}"
+PYSHELL_FIREWALL="${7:-false}"
 
 function exitFailed() {
     echo "${1:-Failed}"
@@ -50,6 +56,23 @@ fi
 if ! "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress psutil; then
     exitFailed "Python pip install in the virtual environment failed"
 fi 
+
+if [[ "${PYSHELL_FIREWALL,,}" != "false" ]]; then
+    printf "\n\nOpening PyShell port in NFT firewall\n"
+    if [[ "${PYSHELL_FIREWALL,,}" == "true" ]]; then
+        # Create our own table
+        sudo nft delete table inet pyshellfirewall 2>/dev/null
+        if ! sudo nft add table inet pyshellfirewall; then exitFailed "Firewall table creation error"; fi
+        if ! sudo nft add chain inet pyshellfirewall input '{ type filter hook input priority filter; policy accept; }'; then exitFailed "Firewall chain creation error"; fi
+        if ! sudo nft add rule inet pyshellfirewall input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
+    else
+        # Use the named table passed in
+        if ! sudo nft add rule inet "$PYSHELL_FIREWALL" input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
+    fi
+    if ! sudo nft list ruleset | sudo tee /etc/nftables.conf; then exitFailed "Firewall save rules error"; fi
+    if ! sudo systemctl enable --now nftables; then exitFailed; fi
+    if ! sudo systemctl restart nftables; then exitFailed; fi
+fi
 
 sudo systemctl daemon-reload
 if ! sudo systemctl enable pyshell.service; then
