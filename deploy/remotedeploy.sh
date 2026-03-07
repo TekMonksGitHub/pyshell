@@ -57,21 +57,30 @@ if ! "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress psutil; th
     exitFailed "Python pip install in the virtual environment failed"
 fi 
 
+# Open firewall ports if indicated, will create firewall NFT rules table too, if needed.
 if [[ "${PYSHELL_FIREWALL,,}" != "false" ]]; then
     printf "\n\nOpening PyShell port in NFT firewall\n"
     if [[ "${PYSHELL_FIREWALL,,}" == "true" ]]; then
-        # Create our own table
-        sudo nft delete table inet pyshellfirewall 2>/dev/null
-        if ! sudo nft add table inet pyshellfirewall; then exitFailed "Firewall table creation error"; fi
-        if ! sudo nft add chain inet pyshellfirewall input '{ type filter hook input priority filter; policy accept; }'; then exitFailed "Firewall chain creation error"; fi
-        if ! sudo nft add rule inet pyshellfirewall input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
-    else
-        # Use the named table passed in
-        if ! sudo nft add rule inet "$PYSHELL_FIREWALL" input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
+        NFT_TABLE=pyshellfirewall
+    else 
+        NFT_TABLE=$PYSHELL_FIREWALL
     fi
+
+    # Create the filter table if it doesn't exist
+    if ! sudo nft list table inet "$NFT_TABLE" > /dev/null 2>&1; then
+        if ! sudo nft add table inet "$NFT_TABLE"; then exitFailed "Firewall table creation error"; fi
+        if ! sudo nft add chain inet "$NFT_TABLE" input '{ type filter hook input priority filter; policy accept; }'; then exitFailed "Firewall chain creation error"; fi
+    fi
+
+    # Delete existing pyshell port rule if present
+    sudo nft -a list chain inet "$NFT_TABLE" input 2>/dev/null | grep "tcp dport $PYSHELL_PORT" | grep -o 'handle [0-9]*' | awk '{print $2}' | while read -r handle; do
+        sudo nft delete rule inet "$NFT_TABLE" input handle "$handle" 2>/dev/null
+    done
+        
+    if ! sudo nft add rule inet "$NFT_TABLE" input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
     if ! sudo nft list ruleset | sudo tee /etc/nftables.conf; then exitFailed "Firewall save rules error"; fi
-    if ! sudo systemctl enable --now nftables; then exitFailed; fi
-    if ! sudo systemctl restart nftables; then exitFailed; fi
+    if ! sudo systemctl enable --now nftables; then exitFailed "Firewall service enable error"; fi
+    if ! sudo systemctl restart nftables; then exitFailed "Firewall reload error"; fi
 fi
 
 sudo systemctl daemon-reload
