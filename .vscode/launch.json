@@ -34,12 +34,12 @@
                 "24",
                 "-d",
                 "109.236.83.38",
-                "62195",
+                "61488",
                 "root",
-                "36f0a37fe15fa8f2deb962504c0c34b91bdb48accd68e117731ea7f62ee7c29d",
+                "8642e72cf5ac8206f3653db9e2201832cda38d614c0c25acee79f0e3a3e0c414",
                 "/root/pyshell",
                 "root",
-                "root671a0289ac7646814cfc8fa9991d679f2278d9142bc0722706608054e613f571",
+                "root8642e72cf5ac8206f3653db9e2201832cda38d614c0c25acee79f0e3a3e0c414",
                 "0.0.0.0",
                 "24",
                 "1800",
@@ -120,7 +120,7 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch JS Client Polling Mode - script",
+            "name": "Launch JS Client Polling Mode - local script",
             "skipFiles": [
                 "<node_internals>/**"
             ],
@@ -134,7 +134,7 @@
                 "-k",
                 "MyMinimum30CharacterAESKey1234",
                 "-r",
-                "500",
+                "101",
                 "-s",
                 "${workspaceFolder}/test.sh",
                 "ls",
@@ -145,7 +145,7 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch JS Client Polling Mode - host script",
+            "name": "Launch JS Client Polling Mode - host test script",
             "skipFiles": [
                 "<node_internals>/**"
             ],
@@ -157,7 +157,32 @@
                 "-p",
                 "24",
                 "-k",
-                "root671a0289ac7646814cfc8fa9991d679f2278d9142bc0722706608054e613f571",
+                "root8642e72cf5ac8206f3653db9e2201832cda38d614c0c25acee79f0e3a3e0c414",
+                "-r",
+                "500",
+                "-s",
+                "${workspaceFolder}/test.sh",
+                "ls",
+                "/Users/"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch JS Client Polling Mode - addhost script",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "env": {"MONKSHU_HOME": "/Users/rvkapoor/Documents/Programs/source/monkshu"},
+            "program": "${workspaceFolder}/pyshellclient.js",
+            "args": [
+                "-h",
+                "109.236.83.38",
+                "-p",
+                "24",
+                "-k",
+                "root8642e72cf5ac8206f3653db9e2201832cda38d614c0c25acee79f0e3a3e0c414",
                 "-r",
                 "500",
                 "-s",

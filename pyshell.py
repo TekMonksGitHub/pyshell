@@ -92,7 +92,7 @@ crypto = None
 host = '127.0.0.1'
 port = '5050'
 PROC_TIMEOUT = 1800  # 30 minutes default timeout
-RESPONSE_TTL = 600  # 10 minutes autodelete response entries
+RESPONSE_TTL = 600   # 10 minutes autodelete response entries which are complete after 10 min
 RESPONSES = {}
 RESPONSES_LOCK = threading.Lock()
 
@@ -153,7 +153,7 @@ def execute_command(cmd, args, timeout=PROC_TIMEOUT, request_id=None):
             line_buffer.append(line.rstrip("\n"))
             if request_id:
                 partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout_lines), "stderr": "\n".join(stderr_lines)}
-                RESPONSES[request_id]["response"] = crypto.encrypt(json.dumps(partial))
+                with RESPONSES_LOCK: RESPONSES[request_id]["response"] = crypto.encrypt(json.dumps(partial))
 
     try:
         full_command = [cmd] + args if isinstance(args, list) else [cmd, args]
@@ -191,23 +191,23 @@ def execute_pycommand(cmd, args, timeout=PROC_TIMEOUT):
     except futures.TimeoutError:
         return {'exit_code': -1, 'stdout': '', 'stderr': f'Execution timed out after {timeout}s'}
 
-def get_cached_or_partial_response(request_id): 
-    with RESPONSES_LOCK:
-        encrypted_response = RESPONSES[request_id]["response"]
-        decrypted_response = json.loads(crypto.decrypt(encrypted_response)) 
+def get_and_update_cached_or_partial_response(request_id): 
+    # Caller must hold RESPONSES_LOCK
+    encrypted_response = RESPONSES[request_id]["response"]
+    decrypted_response = json.loads(crypto.decrypt(encrypted_response)) 
 
-        if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
-        else:
-            stdout_counter = RESPONSES[request_id].get("stdout_counter", 0)
-            stderr_counter = RESPONSES[request_id].get("stderr_counter", 0)
-            stdout = decrypted_response["stdout"].splitlines()[stdout_counter:]
-            stderr = decrypted_response["stderr"].splitlines()[stderr_counter:]
-            RESPONSES[request_id]["stdout_counter"] = len(decrypted_response["stdout"].splitlines())
-            RESPONSES[request_id]["stderr_counter"] = len(decrypted_response["stderr"].splitlines())
-            partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout), "stderr": "\n".join(stderr)}
-            encrypted_response = crypto.encrypt(json.dumps(partial))
+    if not decrypted_response.get("_pyshell_status") == "waiting": RESPONSES.pop(request_id, None)
+    else:
+        stdout_counter = RESPONSES[request_id].get("stdout_counter", 0)
+        stderr_counter = RESPONSES[request_id].get("stderr_counter", 0)
+        stdout = decrypted_response["stdout"].splitlines()[stdout_counter:]
+        stderr = decrypted_response["stderr"].splitlines()[stderr_counter:]
+        RESPONSES[request_id]["stdout_counter"] = len(decrypted_response["stdout"].splitlines())
+        RESPONSES[request_id]["stderr_counter"] = len(decrypted_response["stderr"].splitlines())
+        partial = {"_pyshell_status": "waiting", "exit_code": None, "stdout": "\n".join(stdout), "stderr": "\n".join(stderr)}
+        encrypted_response = crypto.encrypt(json.dumps(partial))
 
-        return encrypted_response
+    return encrypted_response
 
 @app.route('/execute', methods=['POST'])
 def execute_endpoint():
@@ -215,69 +215,58 @@ def execute_endpoint():
     try:
         input_data = decrypt_incoming(request)
 
-        # Validate input format
         if 'cmd' not in input_data and 'pycmd' not in input_data:
             return jsonify({'error': 'Missing cmd or pycmd parameter'}), 400
 
-        # if we already have a cached response send it, no need to do anything else as the task is already running
-        if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
-            request_id = input_data.get("request_id")
-            return jsonify({'data': get_cached_or_partial_response(request_id)})
-        
         def executeCmd(request_id, remote_addr):
             cmd_type = 'oscmd' if 'cmd' in input_data else 'pycmd'
             cmd = input_data.get('cmd') or input_data.get('pycmd')
             args = input_data.get('args', [] if cmd_type == 'oscmd' else {})
             timeout = input_data.get('timeout', PROC_TIMEOUT)
 
-            # Execute command
             logger.info(f"Executing: {remote_addr} -> {cmd} {args}")
-            if cmd_type == 'oscmd': result = execute_command(cmd, args, timeout, request_id)  
+            if cmd_type == 'oscmd': result = execute_command(cmd, args, timeout, request_id)
             else: result = execute_pycommand(cmd, args, timeout)
-            
-            # Encrypt and store response
+
             response_json = json.dumps(result)
             encrypted_response = crypto.encrypt(response_json)
             logger.info(f"Execution result of command ${cmd_type}: {cmd} is {response_json}")
 
-            # save the response for about 10 minutes or till RESPONSE_TTL
-            if request_id:  
-                RESPONSES[request_id] = {"response": encrypted_response}
+            if request_id:
+                with RESPONSES_LOCK: RESPONSES[request_id] = {"response": encrypted_response}
                 threading.Timer(RESPONSE_TTL, lambda request_id=request_id: RESPONSES.pop(request_id, None)).start()
-            else: return encrypted_response
+            else:
+                return encrypted_response
 
         if input_data.get("request_id"):
             request_id = input_data.get("request_id")
-            # execute the command but don't wait
-            threading.Thread(target=executeCmd, args=(request_id, request.remote_addr), daemon=True).start()  # run as a seperate thread
-            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}');
-            RESPONSES[request_id] = {"response": encrypted_response}
+            with RESPONSES_LOCK:    # If another request comes in, it will wait here while first thread that got the request is setting up the responses object
+                if RESPONSES.get(request_id, {}).get("response"):
+                    return jsonify({'data': get_and_update_cached_or_partial_response(request_id)})
+                # Claim the slot before spawning the thread
+                encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}')
+                RESPONSES[request_id] = {"response": encrypted_response}
+            threading.Thread(target=executeCmd, args=(request_id, request.remote_addr), daemon=True).start()
             return jsonify({'data': encrypted_response})
         else:
-            # await the command to return the result
-            encrypted_response = executeCmd(None, request.remote_addr)  # this is same as await executeCmd()
+            encrypted_response = executeCmd(None, request.remote_addr)
             return jsonify({'data': encrypted_response})
-        
+
     except json.JSONDecodeError:
         return jsonify({'error': 'Invalid JSON in decrypted data'}), 400
     except Exception as e:
         logger.error(f"Request processing error: {e}")
         return jsonify({'error': 'Internal server error'}), 500
-    
+
+
 @app.route('/shellscript', methods=['POST'])
 def shellscript_endpoint():
     """Main API endpoint for encrypted shell script execution"""
     try:
         input_data = decrypt_incoming(request)
 
-        # Validate input format
         if 'script' not in input_data or 'scriptfile_path' not in input_data:
             return jsonify({'error': 'Missing script or scriptfile_path parameter'}), 400
-
-        # if we already have a cached response send it, no need to do anything else as the task is already running
-        if input_data.get("request_id") and RESPONSES.get(input_data.get("request_id"), {}).get("response"):  
-            request_id = input_data.get("request_id")
-            return jsonify({'data': get_cached_or_partial_response(request_id)})
 
         def executeShellScript(request_id, remote_addr):
             script = input_data['script']
@@ -291,37 +280,37 @@ def shellscript_endpoint():
             fileout = open(tmp_scriptfile_path, "w")
             fileout.write(script)
             fileout.close()
-            
-            # Execute command
+
             logger.info(f"Executing script: {remote_addr} -> {cmd_shell} {scriptfile_path} {args}")
-            result = execute_command(cmd_shell, [tmp_scriptfile_path]+args, timeout, request_id)
+            result = execute_command(cmd_shell, [tmp_scriptfile_path] + args, timeout, request_id)
 
             try: os.remove(tmp_scriptfile_path)
             except Exception as e: logger.warning(f"Unable to remove temporary file {tmp_scriptfile_path}")
-            
-            # Encrypt response
+
             response_json = json.dumps(result)
             logger.info(f"Execution result of shellscript {scriptfile_path} is {result}")
             encrypted_response = crypto.encrypt(response_json)
 
-            # save the response for about 10 minutes or till RESPONSE_TTL
-            if request_id:  
-                RESPONSES[request_id] = {"response": encrypted_response}
+            if request_id:
+                with RESPONSES_LOCK: RESPONSES[request_id] = {"response": encrypted_response}
                 threading.Timer(RESPONSE_TTL, lambda request_id=request_id: RESPONSES.pop(request_id, None)).start()
-            else: return encrypted_response
-        
+            else:
+                return encrypted_response
+
         if input_data.get("request_id"):
             request_id = input_data.get("request_id")
-            # execute the script but don't wait
+            with RESPONSES_LOCK:
+                if RESPONSES.get(request_id, {}).get("response"):
+                    return jsonify({'data': get_and_update_cached_or_partial_response(request_id)})
+                # Claim the slot before spawning the thread
+                encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}')
+                RESPONSES[request_id] = {"response": encrypted_response}
             threading.Thread(target=executeShellScript, args=(request_id, request.remote_addr), daemon=True).start()
-            encrypted_response = crypto.encrypt('{"_pyshell_status": "waiting", "stdout":"", "stderr":""}');
-            RESPONSES[request_id] = {"response": encrypted_response}
             return jsonify({'data': encrypted_response})
         else:
-            # run the script to return the result
             encrypted_response = executeShellScript(None, request.remote_addr)
             return jsonify({'data': encrypted_response})
-        
+
     except json.JSONDecodeError:
         return jsonify({'error': 'Invalid JSON in decrypted data'}), 400
     except Exception as e:

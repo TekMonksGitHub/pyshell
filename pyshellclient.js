@@ -33,8 +33,7 @@ class ShellCommandClient {
     async fetchRequest(requestData, endpoint, pollfrequency, streamcollector, timeout=DEFAULT_TIMEOUT, 
             pollfailurelimit=MAX_IGNORE_POLL_FAILURES) {
 
-        const _realRequest = async _ => {
-            try {
+        const _realRequest = async _ => { try {
             const encryptedRequest = crypt.encrypt(JSON.stringify(requestData), this.aesKey,
                 undefined, true).toString("base64");
 
@@ -45,7 +44,7 @@ class ShellCommandClient {
                 body: JSON.stringify({data: encryptedRequest}), 
                 timeout
             });
-            if (response.status == 408) throw {request: encryptedRequest};
+            if (response.status == 408) throw {request: requestData};
             if ((!response.ok) || (response.status != 200)) throw {response};
 
             // Decrypt response
@@ -54,19 +53,18 @@ class ShellCommandClient {
             const decryptedResponse = crypt.decrypt(encryptedBytes, this.aesKey);
             const result = JSON.parse(decryptedResponse);
             return result;
-            } catch (error) {
-                if (error.response) {
-                    // HTTP error response
-                    throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data||"")}`);
-                } else if (error.request) {
-                    // Network error
-                    throw new Error(`Network Error: Unable to reach API at ${this.apiUrl}`);
-                } else {
-                    // Other error
-                    throw new Error(`Client Error: ${error.message}`);
-                }
+        } catch (error) {
+            if (error.response) {
+                // HTTP error response
+                throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data||"")}`);
+            } else if (error.request) {
+                // Network error
+                throw new Error(`Network Error: Server reported request timeout at ${this.apiUrl}`);
+            } else {
+                // Other error
+                throw new Error(`Client Error: ${error.message}`);
             }
-        }
+        }}
 
         const promiseToWait = new Promise(async (resolve, reject) => {    // calls _realRequest here in polling or await mode
             if (pollfrequency && pollfrequency > MINIMUM_POLL_FREQUENCY && requestData.request_id) {
@@ -125,7 +123,7 @@ class ShellCommandClient {
             pyshell_process_default_timeout, pyshell_firewall];
         const cmd = args.join(' ');
         try {const {stdout, stderr} = await execasync(cmd); return {stdout, stderr, exit_code: 0};} 
-        catch (error) {return {stdout: undefined, stderr: error.message, exit_code: error.status};}
+        catch (error) {return {stdout: undefined, stderr: error.message, exit_code: 1};}
     }
 }
 
