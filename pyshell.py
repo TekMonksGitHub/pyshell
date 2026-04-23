@@ -38,7 +38,7 @@ class AESCrypto:
             raise ValueError("Key must be at least 30 characters")
         
         # Use MD5 with UTF-8 encoding, convert digest to hex and uppercase
-        md5_hash = hashlib.md5(key_string.encode('utf-8')).hexdigest().upper()
+        md5_hash = hashlib.md5(key_string.encode('utf-8'), usedforsecurity=False).hexdigest().upper()
         # Use the hex string as the key (32 bytes for AES-256)
         self.key = md5_hash.encode('utf8')
     
