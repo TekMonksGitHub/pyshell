@@ -78,9 +78,16 @@ if [[ "${PYSHELL_FIREWALL,,}" != "false" ]]; then
     done
         
     if ! sudo nft add rule inet "$NFT_TABLE" input tcp dport "$PYSHELL_PORT" accept; then exitFailed "Firewall port opening error"; fi
-    if ! sudo nft list ruleset | sudo tee /etc/nftables.conf; then exitFailed "Firewall save rules error"; fi
+
+    ## Persist the rules to disk so they survive reboots
+    if ! sudo mkdir -p /etc/nftables.d; then exitFailed "Firewall dropin dir creation error"; fi
+    sudo tee /etc/nftables.conf > /dev/null <<'EOF'
+#!/usr/sbin/nft -f
+include "/etc/nftables.d/*.nft"
+EOF
+    if [ $? -ne 0 ]; then exitFailed "Firewall conf write error"; fi
+    if ! { echo "table inet $NFT_TABLE"; echo "delete table inet $NFT_TABLE"; sudo nft list table inet "$NFT_TABLE"; } | sudo tee "/etc/nftables.d/$NFT_TABLE.nft" > /dev/null; then exitFailed "Firewall save rules error"; fi
     if ! sudo systemctl enable --now nftables; then exitFailed "Firewall service enable error"; fi
-    if ! sudo systemctl restart nftables; then exitFailed "Firewall reload error"; fi
 fi
 
 sudo systemctl daemon-reload
