@@ -8,7 +8,7 @@
 # 5 - The port to listen on
 # 6 - The process timeout configuration for PyShell
 # 7 - Whether to open an NFT firewall port for PyShell
-
+# 8 - Sudo password (used only to prime the credential cache for this session)
 PYSHELL_PATH="$1"
 PYSHELL_ID="${2:-`whoami`}"
 PYSHELL_KEY=$3
@@ -16,11 +16,16 @@ PYSHELL_HOST=$4
 PYSHELL_PORT=$5
 PYSHELL_TIMEOUT="${6:-1800}"
 PYSHELL_FIREWALL="${7:-false}"
+SUDO_PASS="$8"
 
 function exitFailed() {
     echo "${1:-Failed}"
     exit 1
 }
+
+if ! echo "$SUDO_PASS" | sudo -S -p '' -v 2>/dev/null; then
+    exitFailed "No usable sudo access"
+fi
 
 if ! sed -e "s/{{PYSHELL_ID}}/$PYSHELL_ID/g" \
         -e "s|{{PYSHELL_PATH}}|$PYSHELL_PATH|g" \
@@ -29,7 +34,7 @@ if ! sed -e "s/{{PYSHELL_ID}}/$PYSHELL_ID/g" \
         -e "s|{{PYSHELL_HOST}}|$PYSHELL_HOST|g" \
         -e "s|{{PYSHELL_PORT}}|$PYSHELL_PORT|g" \
         -e "s|{{PYSHELL_TIMEOUT}}|$PYSHELL_TIMEOUT|g" \
-        "$PYSHELL_PATH/pyshell.service.template" > "$PYSHELL_PATH/pyshell.service"; then
+        "$PYSHELL_PATH/pyshell.service.template" | sudo tee "$PYSHELL_PATH/pyshell.service" > /dev/null; then
     exitFailed "Service file expansion failed"
 fi 
 
@@ -48,12 +53,15 @@ if [ -f /etc/os-release ]; then
     fi
 fi
 
-rm -rf "$PYSHELL_PATH/venv"
-if ! /usr/bin/env python3 -m venv "$PYSHELL_PATH/venv"; then 
+if ! sudo rm -rf "$PYSHELL_PATH/venv"; then
+    exitFailed "Removing old venv failed"
+fi
+
+if ! sudo /usr/bin/env python3 -m venv "$PYSHELL_PATH/venv"; then 
     exitFailed "Python virtual environment creation failed"
 fi 
 
-if ! "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress psutil; then
+if ! sudo "$PYSHELL_PATH/venv/bin/pip" install flask cryptography waitress psutil; then
     exitFailed "Python pip install in the virtual environment failed"
 fi 
 
@@ -81,6 +89,7 @@ if [[ "${PYSHELL_FIREWALL,,}" != "false" ]]; then
 
     ## Persist the rules to disk so they survive reboots
     if ! sudo mkdir -p /etc/nftables.d; then exitFailed "Firewall dropin dir creation error"; fi
+
     sudo tee /etc/nftables.conf > /dev/null <<'EOF'
 #!/usr/sbin/nft -f
 include "/etc/nftables.d/*.nft"
@@ -94,6 +103,7 @@ sudo systemctl daemon-reload
 if ! sudo systemctl enable pyshell.service; then
     exitFailed "Service file start with systemd failed"
 fi 
+
 if ! sudo systemctl restart pyshell.service; then
     exitFailed "Service file start with systemd failed"
 fi 
